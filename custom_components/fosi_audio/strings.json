@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Fosi Audio",
+        "description": "Enter the IP address of the streamer. The device must be awake and reachable.",
+        "data": {
+          "host": "Host"
+        }
+      },
+      "reconfigure": {
+        "title": "Change address",
+        "description": "Enter the streamer's new IP address. Entities and history are kept.",
+        "data": {
+          "host": "Host"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the device. If it is on wifi it may be asleep - start playback and try again.",
+      "not_streamsdk": "Responded, but does not look like a StreamSDK device."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "reconfigure_successful": "Address updated.",
+      "wrong_device": "That address is a different device. Add it as a new integration instead."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fosi Audio options",
+        "description": "The source map is JSON. An entry needs a \"path\" to be selectable - either {\"path\": \"...\", \"role\": \"activate\"} to invoke an action node, or {\"path\": \"...\", \"value\": n} to write a value. An entry with only a \"state\" is reported but never offered as an option, which is how the network sources work. Confirm the real indices by watching settings:/custom/lastAudioSource while switching inputs on the remote.",
+        "data": {
+          "sources": "Source map (JSON)",
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "sources": "Leave blank to restore the shipped defaults.",
+          "scan_interval": "How often to read the device's state. Longer is gentler on a device on wifi."
+        }
+      }
+    },
+    "error": {
+      "invalid_sources": "Not valid JSON, or an entry is missing a 'path' or 'state'."
+    }
+  },
+  "entity": {
+    "select": {
+      "input": {
+        "name": "Input"
+      },
+      "output_mode": {
+        "name": "Output mode"
+      }
+    }
+  }
+}

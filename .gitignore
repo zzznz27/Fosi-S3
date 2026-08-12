@@ -1,0 +1,16 @@
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Home Assistant logs dropped here for diagnosis - these run to hundreds of MB
+home-assistant.log*
+*.log
+
+# nsdk.py crawl output
+tree.json
+*.tree.json
+nsdk.py

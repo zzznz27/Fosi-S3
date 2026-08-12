@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# Deliberately conservative: pycodestyle + pyflakes only. Both are already
+# clean, so CI fails on real regressions rather than on style opinions.
+select = ["E", "F", "W"]
