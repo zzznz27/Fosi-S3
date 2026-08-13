@@ -3,10 +3,10 @@
   "name": "Fosi Audio",
   "codeowners": ["@zzznz27"],
   "config_flow": true,
-  "documentation": "https://github.com/zzznz27/fosi-audio-homeassistant",
+  "documentation": "https://github.com/zzznz27/Fosi-S3",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/zzznz27/fosi-audio-homeassistant/issues",
+  "issue_tracker": "https://github.com/zzznz27/Fosi-S3/issues",
   "requirements": [],
   "version": "0.3.0"
 }

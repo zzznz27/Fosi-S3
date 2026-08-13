@@ -1,6 +1,6 @@
 # Fosi Audio — Home Assistant integration
 
-[![CI](https://github.com/zzznz27/fosi-audio-homeassistant/actions/workflows/ci.yml/badge.svg)](https://github.com/zzznz27/fosi-audio-homeassistant/actions/workflows/ci.yml)
+[![CI](https://github.com/zzznz27/Fosi-S3/actions/workflows/ci.yml/badge.svg)](https://github.com/zzznz27/Fosi-S3/actions/workflows/ci.yml)
 [![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
 
 Local control for the Fosi Audio S3 network streamer over its own HTTP API.
