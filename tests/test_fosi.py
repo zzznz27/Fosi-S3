@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
+import re
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -164,6 +165,33 @@ def test_packaging_metadata() -> None:
     strings = json.loads((component / "strings.json").read_text(encoding="utf-8"))
     english = (component / "translations" / "en.json").read_text(encoding="utf-8")
     R.check("en.json matches strings.json", json.loads(english), strings)
+
+
+def test_translation_placeholders() -> None:
+    """Braces in translation strings are placeholders, not literal text.
+
+    Home Assistant parses {name} in any translated string and requires the
+    contents to be a valid identifier, so a JSON example pasted into a
+    description fails hassfest. Caught in CI once; caught here now.
+    """
+    print("\n== translation placeholders are valid identifiers ==")
+    component = HERE.parent / "custom_components" / "fosi_audio"
+    ident = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    bad = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, f"{path}.{key}")
+        elif isinstance(node, str):
+            for found in re.findall(r"\{([^}]*)\}", node):
+                if not ident.match(found):
+                    bad.append(f"{path}: {found!r}")
+
+    for name in ("strings.json", "translations/en.json"):
+        walk(json.loads((component / name).read_text(encoding="utf-8")), name)
+
+    R.check("no invalid placeholders", bad, [])
 
 
 def test_value_encoding() -> None:
@@ -378,6 +406,7 @@ def test_volume_curve_retry() -> None:
 def main() -> int:
     for test in (
         test_packaging_metadata,
+        test_translation_placeholders,
         test_value_encoding,
         test_activate_payload,
         test_url_building,

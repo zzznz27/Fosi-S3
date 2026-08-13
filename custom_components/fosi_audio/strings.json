@@ -30,7 +30,7 @@
     "step": {
       "init": {
         "title": "Fosi Audio options",
-        "description": "The source map is JSON. An entry needs a \"path\" to be selectable - either {\"path\": \"...\", \"role\": \"activate\"} to invoke an action node, or {\"path\": \"...\", \"value\": n} to write a value. An entry with only a \"state\" is reported but never offered as an option, which is how the network sources work. Confirm the real indices by watching settings:/custom/lastAudioSource while switching inputs on the remote.",
+        "description": "The source map is JSON. An entry needs a \"path\" to be selectable: role \"activate\" invokes an action node, role \"value\" writes the given \"value\". An entry with only a \"state\" is reported but never offered as an option, which is how the network sources work. Confirm the real indices by watching settings:/custom/lastAudioSource while switching inputs on the remote.",
         "data": {
           "sources": "Source map (JSON)",
           "scan_interval": "Poll interval (seconds)"
