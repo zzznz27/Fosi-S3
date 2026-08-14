@@ -162,29 +162,27 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
                 | MediaPlayerEntityFeature.VOLUME_STEP
             )
 
+        # The transport row is ALWAYS advertised. Never gate it on anything.
+        #
+        # Home Assistant has no disabled state for transport buttons -
+        # supported_features is binary - so any condition at all makes the row
+        # change shape as playback changes. Two earlier attempts both failed
+        # on this: gating per-key moved buttons between playing and paused,
+        # because the device drops next_ while paused; gating on "is there a
+        # player" then collapsed the whole row when a Cast session ended,
+        # because `controls` disappears with it.
+        #
+        # Pressing one with no player raises a clear error rather than a
+        # device-level 500 - see _async_control.
+        features |= (
+            MediaPlayerEntityFeature.PLAY
+            | MediaPlayerEntityFeature.PAUSE
+            | MediaPlayerEntityFeature.STOP
+            | MediaPlayerEntityFeature.NEXT_TRACK
+            | MediaPlayerEntityFeature.PREVIOUS_TRACK
+        )
+
         controls = self._controls
-        if controls:
-            # A FIXED button row whenever a player is running.
-            #
-            # The device varies `controls` between states - next_ is present
-            # while playing and gone while paused on a Cast source - and
-            # letting that drive supported_features makes the buttons move
-            # around under the cursor as playback changes.
-            #
-            # Home Assistant has no disabled state for transport buttons;
-            # supported_features is binary, so the only way to keep the row
-            # static is to advertise it consistently. A command the source
-            # rejects surfaces the device's own message instead, which is a
-            # better trade than a shifting layout. `stop` already proved
-            # `controls` under-reports: it is accepted on a Cast source that
-            # never advertises it.
-            features |= (
-                MediaPlayerEntityFeature.PLAY
-                | MediaPlayerEntityFeature.PAUSE
-                | MediaPlayerEntityFeature.STOP
-                | MediaPlayerEntityFeature.NEXT_TRACK
-                | MediaPlayerEntityFeature.PREVIOUS_TRACK
-            )
 
         # These stay honest, because they do not sit in the button row: SEEK
         # makes the progress bar draggable, and the play modes render their
@@ -289,7 +287,17 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
 
         activate() passes dicts through encode() untouched, which is the shape
         this node wants.
+
+        The transport buttons are always shown, so this is where "there is
+        nothing to control" gets reported. A clear message beats the device's
+        own HTTP 500, which for a missing player reads "Directory is empty.
+        No playable items found."
         """
+        if not self._controls:
+            raise HomeAssistantError(
+                "Nothing is playing on this device. Transport applies to a "
+                "streaming source, not to HDMI, optical or line in."
+            )
         try:
             await self.coordinator.client.activate(PLAYER_CONTROL_PATH, payload)
         except NsdkError as exc:

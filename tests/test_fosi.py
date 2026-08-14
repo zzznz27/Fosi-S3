@@ -551,12 +551,37 @@ def test_controls_drive_features() -> None:
     seekable = FakePlayer(player={"controls": {"seek": True}})
     R.check("seek grants SEEK", bool(seekable.supported_features & F.SEEK), True)
 
-    print("\n-- no player at all -> no transport whatsoever --")
-    none = FakePlayer(player=STOPPED_PAYLOAD).supported_features
-    for name in (*ROW, "SEEK", "SHUFFLE_SET", "REPEAT_SET"):
-        R.check(f"no {name}", bool(none & getattr(F, name)), False)
-    R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
-    R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
+    print("\n-- the row survives playback stopping entirely --")
+    # `controls` disappears along with the Cast session, which collapsed the
+    # whole row in b2/b3. The row must not depend on it at all.
+    stopped = FakePlayer(player=STOPPED_PAYLOAD).supported_features
+    for name in ROW:
+        R.check(
+            f"{name} still offered when stopped",
+            bool(stopped & getattr(F, name)),
+            True,
+        )
+    empty = FakePlayer().supported_features
+    for name in ROW:
+        R.check(
+            f"{name} offered with no player data",
+            bool(empty & getattr(F, name)),
+            True,
+        )
+
+    print("\n-- but the non-row features still vanish honestly --")
+    for name in ("SEEK", "SHUFFLE_SET", "REPEAT_SET"):
+        R.check(f"no {name} when stopped", bool(stopped & getattr(F, name)), False)
+    R.check("source select still offered", bool(stopped & F.SELECT_SOURCE), True)
+
+    print("\n-- and pressing one with no player explains itself --")
+    idle = FakePlayer(player=STOPPED_PAYLOAD)
+    R.raises(
+        "clear error rather than a device 500",
+        lambda: asyncio.run(idle.async_media_next_track()),
+        Exception,
+    )
+    R.check("nothing was sent to the device", idle.sent, [])
 
 
 def test_transport_commands() -> None:
