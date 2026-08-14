@@ -671,6 +671,58 @@ def test_events_do_not_starve_the_poll() -> None:
     R.check("and publishes", cmd.data["source"], 3)
 
 
+def test_event_stream_watchdog() -> None:
+    """The poll detects a queue that has gone quiet without failing.
+
+    Seen in practice: after switching inputs and resuming AirPlay without
+    disconnecting the phone, the queue stopped delivering. pollQueue kept
+    answering with nothing, which is indistinguishable from an idle system,
+    so the listener never re-subscribed and only the poll ever corrected the
+    input.
+    """
+    print("\n== the poll is a watchdog for the event stream ==")
+
+    class Listener:
+        def __init__(self):
+            self.rebuilds = 0
+
+        def request_resubscribe(self):
+            self.rebuilds += 1
+
+    def coordinator(previous):
+        co = FosiCoordinator.__new__(FosiCoordinator)
+        co.data = previous
+        co.event_listener = Listener()
+        return co
+
+    agreeing = coordinator({"source": 0, "volume": 40})
+    FosiCoordinator._check_event_stream(agreeing, {"source": 0, "volume": 40})
+    R.check("stream agrees -> no rebuild", agreeing.event_listener.rebuilds, 0)
+
+    drifted = coordinator({"source": 3, "volume": 40})
+    FosiCoordinator._check_event_stream(drifted, {"source": 0, "volume": 40})
+    R.check("poll saw a change events missed", drifted.event_listener.rebuilds, 1)
+
+    print("\n-- play_time advances on its own, so it proves nothing --")
+    ticking = coordinator({"source": 0, "play_time": 1000})
+    FosiCoordinator._check_event_stream(ticking, {"source": 0, "play_time": 9000})
+    R.check("position drift is not a fault", ticking.event_listener.rebuilds, 0)
+
+    print("\n-- and the listener honours the request --")
+    listener = FosiEventListener.__new__(FosiEventListener)
+    listener._resubscribe = False
+    R.check("starts clear", listener._resubscribe, False)
+    listener.request_resubscribe()
+    R.check("flag set", listener._resubscribe, True)
+
+    print("\n-- no listener yet, or no prior data: nothing to compare --")
+    early = FosiCoordinator.__new__(FosiCoordinator)
+    early.data = {}
+    early.event_listener = Listener()
+    FosiCoordinator._check_event_stream(early, {"source": 0})
+    R.check("first poll never triggers a rebuild", early.event_listener.rebuilds, 0)
+
+
 def test_position_timestamp() -> None:
     """media_position_updated_at has to move whenever the position does.
 
@@ -955,6 +1007,7 @@ def main() -> int:
         test_conditional_polling,
         test_event_parsing,
         test_events_do_not_starve_the_poll,
+        test_event_stream_watchdog,
         test_position_timestamp,
         test_network_service_attribute,
         test_streaming_service,

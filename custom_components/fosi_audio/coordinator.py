@@ -54,6 +54,8 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.volume_map: list[float] = []
         # When the last successful poll landed, for media_position_updated_at.
         self.last_updated: datetime | None = None
+        # Set once the listener exists; the poll uses it as a watchdog.
+        self.event_listener: Any = None
         # False until we know whether this device has a usable volume curve.
         # A read that merely timed out must not be mistaken for "no curve".
         self._volume_map_settled = False
@@ -180,7 +182,35 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Timestamp so media_position can be extrapolated between polls; the
         # progress bar sticks without it.
         self.last_updated = dt_util.utcnow()
+        self._check_event_stream(data)
         return data
+
+    def _check_event_stream(self, polled: dict[str, Any]) -> None:
+        """Use the poll as a watchdog for the event stream.
+
+        An event queue can stop delivering without ever failing - the device
+        keeps answering pollQueue with nothing, which looks exactly like an
+        idle system - so the listener cannot tell from silence alone. But if
+        a real read disagrees with what events last reported, the stream has
+        missed something and is not to be trusted.
+
+        Seen in practice after switching inputs and resuming AirPlay without
+        disconnecting the phone: the queue went quiet, and only the poll ever
+        corrected the input.
+        """
+        if self.event_listener is None or not self.data:
+            return
+        stale = [
+            key
+            for key, value in polled.items()
+            if key in self.data and self.data[key] != value
+        ]
+        # play_time always differs - it advances on its own - so it says
+        # nothing about whether the stream is healthy.
+        stale = [key for key in stale if key != "play_time"]
+        if stale:
+            _LOGGER.debug("Event stream missed %s; resubscribing", stale)
+            self.event_listener.request_resubscribe()
 
     @staticmethod
     def _skip(key: str, data: dict[str, Any]) -> bool:

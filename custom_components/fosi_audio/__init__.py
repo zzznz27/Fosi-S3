@@ -66,6 +66,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> bool
     # Push updates. Polling stays on underneath as a safety net, so a stream
     # that dies silently degrades to slow rather than freezing the entities.
     listener = FosiEventListener(coordinator, client)
+    # The poll doubles as a watchdog: if it ever reads a value the stream
+    # never reported, the queue has gone quiet and needs rebuilding.
+    coordinator.event_listener = listener
     listener.start()
 
     _async_remove_stale_entities(hass, entry)

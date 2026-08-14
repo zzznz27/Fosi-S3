@@ -51,6 +51,7 @@ class FosiEventListener:
         self._coordinator = coordinator
         self._client = client
         self._task: asyncio.Task | None = None
+        self._resubscribe = False
         # Reverse of POLL_PATHS, so an event path maps back to a data key.
         self._paths = {path: key for key, path in POLL_PATHS.items()}
 
@@ -73,6 +74,17 @@ class FosiEventListener:
     def _subscriptions(self) -> list[dict[str, str]]:
         return [{"path": path, "type": SUBSCRIBE_TYPE} for path in POLL_PATHS.values()]
 
+    def request_resubscribe(self) -> None:
+        """Rebuild the queue at the next opportunity.
+
+        Called when the scheduled poll finds values the event stream never
+        reported. A queue can stop delivering without ever failing - the
+        device keeps answering pollQueue with nothing, which is
+        indistinguishable from "nothing has happened" - so silence alone
+        cannot be used as the signal. Disagreement with a real read can.
+        """
+        self._resubscribe = True
+
     async def _run(self) -> None:
         """Subscribe, then long-poll forever, re-subscribing on failure."""
         backoff = BACKOFF_START
@@ -80,6 +92,15 @@ class FosiEventListener:
 
         while True:
             try:
+                if self._resubscribe:
+                    _LOGGER.debug(
+                        "%s: rebuilding the event queue - the poll saw a change "
+                        "the stream did not report",
+                        self._client.host,
+                    )
+                    self._resubscribe = False
+                    queue_id = None
+
                 if queue_id is None:
                     queue_id = await self._client.modify_queue(
                         "", self._subscriptions
