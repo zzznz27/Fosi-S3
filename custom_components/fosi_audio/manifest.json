@@ -1,14 +1,16 @@
 {
   "domain": "fosi_audio",
   "name": "Fosi Audio",
-  "codeowners": ["@zzznz27"],
+  "codeowners": [
+    "@zzznz27"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/zzznz27/Fosi-S3",
   "integration_type": "device",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/zzznz27/Fosi-S3/issues",
   "requirements": [],
-  "version": "0.5.0b1",
+  "version": "0.5.0b2",
   "zeroconf": [
     {
       "type": "_googlecast._tcp.local.",
