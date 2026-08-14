@@ -40,6 +40,24 @@ gets play/pause, next, previous and stop but not seek.
 Volume and mute likewise only appear if the device answers on those nodes. The
 entity degrades rather than offering controls that fail.
 
+### Volume is the device's own scale, and it is not linear
+
+Home Assistant's 0–100% maps 1:1 onto the device's own 0–100 volume, so the
+slider always matches the front panel and the Fosi app. That scale is heavily
+weighted towards the top:
+
+| Slider | dB | Roughly |
+|---|---|---|
+| 50% | −30 dB | an eighth of full loudness |
+| 60% | −20 dB | a quarter |
+| 80% | −10 dB | half |
+| 100% | 0 dB | full |
+
+Sixty of the device's hundred steps sit below −20 dB, so most of the usable
+range is in the top half of the slider. This is the hardware's curve, not a
+fault in the integration — the `volume_db` attribute on the media player
+reports the actual dB if you want to see it.
+
 ## Requirements
 
 - Home Assistant 2024.12 or newer
