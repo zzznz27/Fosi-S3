@@ -240,6 +240,21 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
     def media_position_updated_at(self) -> datetime | None:
         return self.coordinator.last_updated
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Source attributes, plus the dB the current volume actually produces.
+
+        The device's curve is steep - half the slider is below -30 dB - so the
+        raw dB is worth surfacing to explain why 50% sounds so quiet. Read
+        straight off the device's own volumeMap, never calculated.
+        """
+        return {
+            **super().extra_state_attributes,
+            "volume_db": self.coordinator.volume_to_db(
+                self.coordinator.data.get("volume")
+            ),
+        }
+
     # ------------------------------------------------------------ commands
 
     async def _async_control(self, **payload: Any) -> None:
