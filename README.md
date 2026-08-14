@@ -7,68 +7,48 @@
 
 Local control for the Fosi Audio S3 network streamer over its own HTTP API.
 
-The S3 already works in Home Assistant through the built-in `cast` integration,
-which gives you transport, volume and now-playing metadata. What Cast cannot do
-is **switch the physical input**. That is what this adds.
+The S3 already reaches Home Assistant through Cast and AirPlay, which give you
+transport and volume for whatever they are streaming. Neither can **switch the
+physical input** — HDMI eARC, optical, line in or Bluetooth. That is the gap
+this fills.
 
-Tested on the S3. The device is a StreamUnlimited Stream1832 module running
-StreamSDK, so other StreamSDK hardware may work with a different source map.
+Tested on the S3, a StreamUnlimited Stream1832 module running StreamSDK. Other
+StreamSDK hardware may work with a different source map.
 
 ## Entities
 
-| Entity | Does |
+| Entity | What it does |
 |---|---|
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
-| `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
-| `media_player.<name>` | Source, volume, mute, transport (incl. stop), now-playing |
+| `select.<name>_output_mode` | RCA/XLR Out or Optical Out — the hardware allows one at a time |
+| `media_player.<name>` | Source, volume, mute, transport, now-playing |
 | `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
 | `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
 
-Transport covers play/pause, next, previous and stop, plus a power button that
-ends the streaming session — the same control other Cast devices offer. It
-works for whatever is streaming, including AirPlay, Spotify Connect, Tidal
-Connect and Bluetooth, none of which Home Assistant can otherwise control.
+Transport is play/pause, next, previous, stop, and a power button that ends the
+streaming session — the device is an amplifier with no standby, so there is no
+matching "on". Now-playing gives title, artist, album, artwork and position.
+This works for whatever is streaming to the device, notably AirPlay, which Home
+Assistant otherwise cannot see at all.
 
-The device is an amplifier with no standby, so the power button quits the
-session rather than switching hardware off. There is no matching "on".
+The device reports which of those actions the current source supports and only
+those are offered, so HDMI, optical and line in get no transport buttons —
+there is no player behind them. Volume and mute likewise appear only if the
+device answers on those nodes.
 
-Now-playing gives title, artist, album, artwork and position.
+Protocol and service are separate facts, and the device reports both. Casting
+Apple Music reads as protocol "Google Cast", service "Apple Music". AirPlay
+names no app, so the service is genuinely unknown there while the protocol
+still reports.
 
-**Protocol and service are separate.** How audio arrives and what is playing it
-are different facts, and the device reports both. Casting Apple Music gives
-protocol "Google Cast" and service "Apple Music". AirPlay names no app, so the
-service is genuinely unknown there while the protocol still reports. The
-Connect protocols only carry one service, so Spotify Connect implies Spotify.
+Cast, AirPlay, Roon and the Connect protocols seize the device when something
+streams to them, so they can be reported but not selected. The input select
+shows `Network` while one is live; its `selectable_sources` attribute lists the
+inputs that can actually be switched to, which is what automations should read.
 
-Updates are pushed by the device rather than polled, so a track change or a
-press on the remote shows up in well under a second.
-
-### Buttons match what the source can actually do
-
-The device reports which transport actions the current source supports, and
-the entity advertises only those. So HDMI, optical and line-in get no
-transport buttons at all — there is no player behind them.
-
-Volume and mute likewise only appear if the device answers on those nodes. The
-entity degrades rather than offering controls that fail.
-
-### Volume is the device's own scale, and it is not linear
-
-Home Assistant's 0–100% maps 1:1 onto the device's own 0–100 volume, so the
-slider always matches the front panel and the Fosi app. That scale is heavily
-weighted towards the top:
-
-| Slider | dB | Roughly |
-|---|---|---|
-| 50% | −30 dB | an eighth of full loudness |
-| 60% | −20 dB | a quarter |
-| 80% | −10 dB | half |
-| 100% | 0 dB | full |
-
-Sixty of the device's hundred steps sit below −20 dB, so most of the usable
-range is in the top half of the slider. This is the hardware's curve, not a
-fault in the integration — the `volume_db` attribute on the media player
-reports the actual dB if you want to see it.
+Updates are pushed by the device over its event API, so a track change or a
+press on the remote appears in a fraction of a second. Polling continues
+underneath as a safety net.
 
 ## Requirements
 
@@ -104,14 +84,13 @@ integrations at startup.
 #### Then add the device
 
 After the restart the S3 is usually **discovered automatically**. Look under
-**Settings → Devices & Services**; it appears as a discovered device, and you
-only have to confirm it. No IP to type.
+**Settings → Devices & Services**; it appears as a discovered device and you
+only have to confirm it. No IP to type. Discovery is checked against the
+device's own API before it is offered, so other Cast hardware on your network
+is never mistaken for a Fosi.
 
-Discovery is confirmed against the device's own API before it is offered, so
-other Cast hardware on your network is never mistaken for a Fosi.
-
-If it does not appear — mDNS does not always cross VLANs or subnets — add it
-by hand: **Settings → Devices & Services → Add Integration → Fosi Audio**, and
+If it does not appear — mDNS does not always cross VLANs or subnets — add it by
+hand: **Settings → Devices & Services → Add Integration → Fosi Audio**, and
 enter the device's IP.
 
 #### Updating
@@ -141,17 +120,9 @@ integration — that keeps your entity IDs and history.
 
 From **Configure** on the integration card. No YAML.
 
-**Poll interval** (default 60s) — only a safety net. The device pushes changes
-over its event API, so track changes, input switches from the remote and knob
-turns all appear within a fraction of a second. Polling exists so that a
-dropped event stream degrades to slow updates rather than stale ones, and it
-only ever fills in values the stream has not supplied — a poll never overwrites
-something newer that arrived while it was running.
-
-The event subscription is also rebuilt every 15 minutes regardless of health.
-A queue can stop delivering without reporting any error, and from the outside
-that is indistinguishable from a device with nothing to say, so it is replaced
-on a timer rather than waiting for a symptom.
+**Poll interval** (default 60s, 5–600 allowed) — a safety net only, since the
+device pushes its own changes. A poll fills in values the event stream has not
+supplied; it never overwrites something newer.
 
 **Source map** — the input list is configuration, so other StreamSDK hardware
 can be supported without touching code:
@@ -173,58 +144,13 @@ can be supported without touching code:
 
 Leave the field blank to restore the defaults.
 
-## Using it alongside Cast
-
-Both this integration and the `cast` integration can control a Cast stream.
-Cast carries richer session metadata; this one switches inputs. A built-in
-`universal` media player combines them into one card:
-
-```yaml
-media_player:
-  - platform: universal
-    name: Living Room Receiver
-    children:
-      - media_player.living_room_reciever      # the cast entity
-    commands:
-      select_source:
-        action: select.select_option
-        target:
-          entity_id: select.living_room_input
-        data:
-          option: "{{ source }}"
-    attributes:
-      source: select.living_room_input|state
-      source_list: select.living_room_input|attribute.selectable_sources
-```
-
-## Network sources
-
-Cast, AirPlay, Roon and the Connect protocols seize the device when something
-streams to them. They can be reported but not selected, so automations must
-assume the input can change on its own.
-
-"Network" appears in `options` only while it is live. Use `selectable_sources`
-in automations that pick an input:
-
-```yaml
-{{ state_attr('select.living_room_input', 'selectable_sources') }}
-```
-
-## Reporting a problem
-
-Download diagnostics from the device page (⋮ → **Download diagnostics**) and
-attach it to the issue. It lists which nodes answered, what the device said
-its current source supports, and which paths came back as non-existent — which
-is almost always the reason a feature is missing. Serial, MAC and the device
-name are redacted.
-
-This matters most for hardware nobody here owns: every node path was worked
-out from one S3, and the settings tree already mentions an S3 Lite and an S5.
-
 ## Troubleshooting
 
+**Entities drop out.** Expected on wifi — the S3 sleeps its radio when idle. It
+has an RJ45, and Ethernet avoids this entirely.
+
 **No log output.** If every line in `home-assistant.log` is WARNING or ERROR,
-your instance filters INFO:
+your instance is filtering INFO:
 
 ```yaml
 logger:
@@ -232,8 +158,11 @@ logger:
     custom_components.fosi_audio: debug
 ```
 
-**Entities drop out.** Expected on wifi — the S3 sleeps its radio when idle.
-It has an RJ45, and Ethernet avoids this entirely.
+**Reporting a problem.** Download diagnostics from the device page (⋮ →
+**Download diagnostics**) and attach it to the issue. It lists which nodes
+answered, what the device said its current source supports, and which paths
+came back as non-existent — almost always the reason a feature is missing.
+Serial, MAC and the device name are redacted.
 
 ## Security
 
