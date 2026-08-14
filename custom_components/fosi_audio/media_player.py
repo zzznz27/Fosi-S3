@@ -5,18 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
     MediaType,
-    RepeatMode,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import FosiConfigEntry
@@ -25,19 +21,13 @@ from .const import (
     CONTROL_KEY_NEXT,
     CONTROL_KEY_PAUSE,
     CONTROL_KEY_PLAY,
-    CONTROL_KEY_PLAY_MODE,
     CONTROL_KEY_PREVIOUS,
-    CONTROL_KEY_SEEK,
     CONTROL_NEXT,
     CONTROL_PLAY,
-    CONTROL_PLAY_MODE,
     CONTROL_PREVIOUS,
-    CONTROL_SEEK,
     CONTROL_STOP,
     CONTROL_TOGGLE,
     MUTE_PATH,
-    PLAY_MODE_LOOKUP,
-    PLAY_MODES,
     PLAYER_CONTROL_PATH,
     PLAYER_STATE_PAUSED,
     PLAYER_STATE_PLAYING,
@@ -50,9 +40,6 @@ from .entity import FosiSourceEntity
 # All I/O goes through the coordinator, so HA need not serialise
 # entity updates.
 PARALLEL_UPDATES = 0
-
-SERVICE_SEEK_RELATIVE = "seek_relative"
-ATTR_OFFSET = "offset"
 
 STATE_MAP: dict[str, MediaPlayerState] = {
     PLAYER_STATE_PLAYING: MediaPlayerState.PLAYING,
@@ -102,14 +89,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     async_add_entities([FosiMediaPlayer(entry.runtime_data.coordinator, entry)])
-
-    # Home Assistant's own seek is absolute; the device also accepts a signed
-    # relative seek, which is worth exposing.
-    entity_platform.async_get_current_platform().async_register_entity_service(
-        SERVICE_SEEK_RELATIVE,
-        {vol.Required(ATTR_OFFSET): vol.Coerce(float)},
-        "async_seek_relative",
-    )
 
 
 class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
@@ -185,13 +164,6 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
         # player is running at all.
         if controls:
             features |= MediaPlayerEntityFeature.STOP
-        if controls.get(CONTROL_KEY_SEEK):
-            features |= MediaPlayerEntityFeature.SEEK
-        if controls.get(CONTROL_KEY_PLAY_MODE):
-            features |= (
-                MediaPlayerEntityFeature.SHUFFLE_SET
-                | MediaPlayerEntityFeature.REPEAT_SET
-            )
         return features
 
     @property
@@ -262,16 +234,6 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
     def media_position_updated_at(self) -> datetime | None:
         return self.coordinator.last_updated
 
-    @property
-    def shuffle(self) -> bool | None:
-        entry = PLAY_MODE_LOOKUP.get(self.coordinator.data.get("play_mode"))
-        return entry[0] if entry else None
-
-    @property
-    def repeat(self) -> RepeatMode | None:
-        entry = PLAY_MODE_LOOKUP.get(self.coordinator.data.get("play_mode"))
-        return RepeatMode(entry[1]) if entry else None
-
     # ------------------------------------------------------------ commands
 
     async def _async_control(self, **payload: Any) -> None:
@@ -314,39 +276,6 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         await self._async_control(control=CONTROL_PREVIOUS)
-
-    async def async_media_seek(self, position: float) -> None:
-        await self._async_control(control=CONTROL_SEEK, time=int(position * 1000))
-        self.coordinator.apply_optimistic(play_time=int(position * 1000))
-
-    async def async_seek_relative(self, offset: float) -> None:
-        """Seek by a signed offset in seconds. Custom service."""
-        await self._async_control(
-            control=CONTROL_SEEK, timeRelative=int(offset * 1000)
-        )
-
-    async def async_set_shuffle(self, shuffle: bool) -> None:
-        await self._async_set_play_mode(shuffle=shuffle)
-
-    async def async_set_repeat(self, repeat: RepeatMode) -> None:
-        await self._async_set_play_mode(repeat=str(repeat))
-
-    async def _async_set_play_mode(
-        self, shuffle: bool | None = None, repeat: str | None = None
-    ) -> None:
-        """Recombine shuffle and repeat into the device's single playMode."""
-        current = PLAY_MODE_LOOKUP.get(
-            self.coordinator.data.get("play_mode"), (False, "off")
-        )
-        key = (
-            current[0] if shuffle is None else shuffle,
-            current[1] if repeat is None else repeat,
-        )
-        mode = PLAY_MODES.get(key)
-        if mode is None:
-            raise HomeAssistantError(f"Unsupported shuffle/repeat combination {key}")
-        await self._async_control(control=CONTROL_PLAY_MODE, playMode=mode)
-        self.coordinator.apply_optimistic(play_mode=mode)
 
     async def async_select_source(self, source: str) -> None:
         await self._async_apply_source(source)

@@ -19,13 +19,20 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
+| `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
+| `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
 
-Transport covers play/pause, next, previous, stop and — where the source
-supports it — seek and shuffle/repeat. It works for whatever is streaming,
-including AirPlay, Spotify Connect, Tidal Connect and Bluetooth, none of which
-Home Assistant can otherwise control.
+Transport covers play/pause, next, previous and stop. It works for whatever is
+streaming, including AirPlay, Spotify Connect, Tidal Connect and Bluetooth,
+none of which Home Assistant can otherwise control.
 
 Now-playing gives title, artist, album, artwork and position.
+
+**Protocol and service are separate.** How audio arrives and what is playing it
+are different facts, and the device reports both. Casting Apple Music gives
+protocol "Google Cast" and service "Apple Music". AirPlay names no app, so the
+service is genuinely unknown there while the protocol still reports. The
+Connect protocols only carry one service, so Spotify Connect implies Spotify.
 
 Updates are pushed by the device rather than polled, so a track change or a
 press on the remote shows up in well under a second.
@@ -34,8 +41,7 @@ press on the remote shows up in well under a second.
 
 The device reports which transport actions the current source supports, and
 the entity advertises only those. So HDMI, optical and line-in get no
-transport buttons at all — there is no player behind them — and a Cast stream
-gets play/pause, next, previous and stop but not seek.
+transport buttons at all — there is no player behind them.
 
 Volume and mute likewise only appear if the device answers on those nodes. The
 entity degrades rather than offering controls that fail.
@@ -66,10 +72,49 @@ reports the actual dB if you want to see it.
 
 ## Install
 
-**HACS:** ⋮ → Custom repositories → add this repo as category **Integration** →
-install → restart.
+### HACS
 
-**Manual:**
+This is not in the HACS default store, so it has to be added as a custom
+repository first. That is a one-off; updates arrive normally afterwards.
+
+You need [HACS](https://hacs.xyz) already installed.
+
+1. Open **HACS** in the Home Assistant sidebar.
+2. Click the **⋮** menu, top right, and choose **Custom repositories**.
+3. Paste the repository URL:
+
+   ```
+   https://github.com/zzznz27/Fosi-S3
+   ```
+
+4. Set **Type** (or **Category**) to **Integration**, then click **Add**.
+5. Close the dialog. Search HACS for **Fosi Audio** and open it.
+6. Click **Download**, accept the version offered, and **restart Home
+   Assistant**.
+
+The restart is not optional — Home Assistant only scans for new custom
+integrations at startup.
+
+#### Then add the device
+
+After the restart the S3 is usually **discovered automatically**. Look under
+**Settings → Devices & Services**; it appears as a discovered device, and you
+only have to confirm it. No IP to type.
+
+Discovery is confirmed against the device's own API before it is offered, so
+other Cast hardware on your network is never mistaken for a Fosi.
+
+If it does not appear — mDNS does not always cross VLANs or subnets — add it
+by hand: **Settings → Devices & Services → Add Integration → Fosi Audio**, and
+enter the device's IP.
+
+#### Updating
+
+HACS shows an update on its own dashboard when a new version is released. Open
+the integration in HACS, click **Update**, then **restart Home Assistant**
+again. Your configuration and entity IDs are preserved.
+
+### Manual
 
 ```bash
 cp -r custom_components/fosi_audio /config/custom_components/
@@ -115,19 +160,6 @@ can be supported without touching code:
 
 Leave the field blank to restore the defaults.
 
-## Services
-
-**`fosi_audio.seek_relative`** — jump forward or back from the current
-position, since Home Assistant's built-in seek is absolute only.
-
-```yaml
-action: fosi_audio.seek_relative
-target:
-  entity_id: media_player.living_room
-data:
-  offset: -30        # seconds; negative seeks backwards
-```
-
 ## Using it alongside Cast
 
 Both this integration and the `cast` integration can control a Cast stream.
@@ -164,6 +196,17 @@ in automations that pick an input:
 ```yaml
 {{ state_attr('select.living_room_input', 'selectable_sources') }}
 ```
+
+## Reporting a problem
+
+Download diagnostics from the device page (⋮ → **Download diagnostics**) and
+attach it to the issue. It lists which nodes answered, what the device said
+its current source supports, and which paths came back as non-existent — which
+is almost always the reason a feature is missing. Serial, MAC and the device
+name are redacted.
+
+This matters most for hardware nobody here owns: every node path was worked
+out from one S3, and the settings tree already mentions an S3 Lite and an S5.
 
 ## Troubleshooting
 

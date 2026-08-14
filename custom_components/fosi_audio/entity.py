@@ -15,7 +15,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import FosiConfigEntry
 from .api import NsdkError
-from .const import CONF_SOURCES, DEFAULT_MODEL, DEFAULT_SOURCES, DOMAIN, MANUFACTURER
+from .const import (
+    CONF_SOURCES,
+    DEFAULT_MODEL,
+    DEFAULT_SOURCES,
+    DOMAIN,
+    IMPLIED_SERVICES,
+    MANUFACTURER,
+    PROTOCOL_NAMES,
+)
 from .coordinator import FosiCoordinator
 
 
@@ -35,6 +43,52 @@ def match_source(sources: dict, state: Any) -> str | None:
         if expected is not None and expected == state:
             return name
     return None
+
+
+def player_metadata(player: Any) -> dict[str, Any]:
+    """The metaData block, or {} if anything on the way down is missing."""
+    node: Any = player
+    for key in ("trackRoles", "mediaData", "metaData"):
+        if not isinstance(node, dict):
+            return {}
+        node = node.get(key)
+    return node if isinstance(node, dict) else {}
+
+
+def _text(meta: dict[str, Any], key: str) -> str | None:
+    value = meta.get(key)
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def streaming_protocol(player: Any) -> str | None:
+    """How audio is arriving - "Google Cast", "AirPlay", "Spotify Connect".
+
+    Derived from serviceID, which is the stable machine-readable field. An
+    unrecognised id is title-cased rather than dropped, so a protocol nobody
+    here has seen still reports something sensible.
+    """
+    meta = player_metadata(player)
+    service_id = _text(meta, "serviceID")
+    if service_id:
+        return PROTOCOL_NAMES.get(service_id.lower(), service_id.title())
+    # No serviceID but something is playing - better than reporting nothing.
+    return _text(meta, "serviceName")
+
+
+def streaming_service(player: Any) -> str | None:
+    """What is playing - "YouTube Music", "Spotify", "Apple Music".
+
+    Cast names the app in externalAppName. AirPlay does not, so the service is
+    genuinely unknown there - None rather than a guess. The Connect protocols
+    only ever carry one service, so it can be inferred from the protocol even
+    when no app is named.
+    """
+    meta = player_metadata(player)
+    app = _text(meta, "externalAppName")
+    if app:
+        return app
+    service_id = _text(meta, "serviceID")
+    return IMPLIED_SERVICES.get(service_id.lower()) if service_id else None
 
 
 def selectable(sources: dict) -> list[str]:
@@ -174,6 +228,11 @@ class FosiSourceEntity(FosiEntity):
         return options
 
     @property
+    def _network_protocol(self) -> str | None:
+        """How a network source is arriving, when one is."""
+        return streaming_protocol(self.coordinator.data.get("player"))
+
+    @property
     def _network_service(self) -> str | None:
         """What is streaming, when the source is a network protocol.
 
@@ -181,18 +240,7 @@ class FosiSourceEntity(FosiEntity):
         automations comparing against it keep working; the live service is
         surfaced here instead, and as app_name on the media player.
         """
-        player = self.coordinator.data.get("player")
-        if not isinstance(player, dict):
-            return None
-        node: Any = player
-        for key in ("trackRoles", "mediaData", "metaData"):
-            if not isinstance(node, dict):
-                return None
-            node = node.get(key)
-        if not isinstance(node, dict):
-            return None
-        name = node.get("externalAppName") or node.get("serviceName")
-        return name.strip() or None if isinstance(name, str) else None
+        return streaming_service(self.coordinator.data.get("player"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -201,6 +249,7 @@ class FosiSourceEntity(FosiEntity):
             "active_source": self._active_source,
             # Which of the options can actually be commanded right now.
             "selectable_sources": self._commandable_sources,
+            "network_protocol": self._network_protocol,
             "network_service": self._network_service,
         }
 

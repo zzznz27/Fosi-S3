@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import NsdkClient, NsdkError, NsdkUnsupportedError
@@ -15,7 +17,13 @@ from .const import DEFAULT_SCAN_INTERVAL
 from .coordinator import FosiCoordinator
 from .events import FosiEventListener
 
-PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.SELECT]
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS: list[Platform] = [
+    Platform.MEDIA_PLAYER,
+    Platform.SELECT,
+    Platform.SENSOR,
+]
 
 
 @dataclass
@@ -56,6 +64,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> bool
     listener = FosiEventListener(coordinator, client)
     listener.start()
 
+    _async_remove_stale_entities(hass, entry)
+
     entry.runtime_data = FosiRuntimeData(
         client=client, coordinator=coordinator, listener=listener
     )
@@ -68,6 +78,23 @@ async def async_unload_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> boo
     """Unload a config entry."""
     await entry.runtime_data.listener.async_stop()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+@callback
+def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop entities from platforms this integration no longer provides.
+
+    Home Assistant keeps registry entries for entities that stop being
+    created, so they linger as unavailable rows forever. The like/dislike
+    buttons were removed in 0.5.0 and would otherwise haunt every device page
+    that ever ran a build containing them.
+    """
+    registry = er.async_get(hass)
+    live = {platform.value for platform in PLATFORMS}
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.domain not in live:
+            _LOGGER.debug("Removing stale entity %s", entity.entity_id)
+            registry.async_remove(entity.entity_id)
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> None:

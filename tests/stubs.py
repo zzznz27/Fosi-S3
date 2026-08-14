@@ -6,6 +6,7 @@ without a Home Assistant install.
 
 import sys
 import types
+from dataclasses import dataclass
 from enum import IntFlag
 
 
@@ -51,8 +52,10 @@ _mod("voluptuous", Schema=Schema, Required=Required, All=All, Coerce=Coerce,
 
 # --------------------------------------------------------- homeassistant.*
 class Platform:
+    BUTTON = "button"
     MEDIA_PLAYER = "media_player"
     SELECT = "select"
+    SENSOR = "sensor"
 
 class ConfigEntry(_Generic):
     def __init__(self, entry_id="e1", title="S3", data=None, options=None):
@@ -152,12 +155,50 @@ _dr = _mod("homeassistant.helpers.device_registry", DeviceInfo=DeviceInfo,
 sys.modules["homeassistant.helpers"].device_registry = _dr
 _mod("homeassistant.helpers.aiohttp_client",
      async_get_clientsession=lambda hass: ClientSession())
+_er = _mod("homeassistant.helpers.entity_registry",
+           async_get=lambda hass: None,
+           async_entries_for_config_entry=lambda reg, entry_id: [])
+sys.modules["homeassistant.helpers"].entity_registry = _er
 _mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object)
 _mod("homeassistant.helpers.update_coordinator",
      DataUpdateCoordinator=DataUpdateCoordinator, UpdateFailed=UpdateFailed,
      CoordinatorEntity=CoordinatorEntity)
 _mod("homeassistant.components")
 _mod("homeassistant.components.select", SelectEntity=SelectEntity)
+
+
+@dataclass(frozen=True, kw_only=True)
+class EntityDescription:
+    """Mirrors HA's frozen kw_only dataclass, which subclasses extend."""
+
+    key: str
+    translation_key: str | None = None
+    icon: str | None = None
+    name: str | None = None
+    entity_category: object | None = None
+
+
+class SensorEntity: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class SensorEntityDescription(EntityDescription):
+    device_class: object | None = None
+    native_unit_of_measurement: str | None = None
+    state_class: object | None = None
+
+
+_mod("homeassistant.components.sensor", SensorEntity=SensorEntity,
+     SensorEntityDescription=SensorEntityDescription)
+def async_redact_data(data, keys):
+    """Mirrors HA's redactor closely enough for the shape we rely on."""
+    return {k: ("**REDACTED**" if k in keys else v) for k, v in (data or {}).items()}
+
+
+_mod("homeassistant.components.diagnostics", async_redact_data=async_redact_data)
+_mod("homeassistant.helpers.service_info")
+_zc = _mod("homeassistant.helpers.service_info.zeroconf", ZeroconfServiceInfo=object)
+sys.modules["homeassistant.helpers.service_info"].zeroconf = _zc
 _mod("homeassistant.components.media_player", MediaPlayerEntity=MediaPlayerEntity,
      MediaPlayerEntityFeature=MediaPlayerEntityFeature,
      MediaPlayerState=MediaPlayerState, MediaType=MediaType, RepeatMode=RepeatMode)
@@ -167,6 +208,10 @@ class _Platform:
     def async_register_entity_service(self, *a, **kw): ...
 
 
+_er = _mod("homeassistant.helpers.entity_registry",
+           async_get=lambda hass: None,
+           async_entries_for_config_entry=lambda reg, entry_id: [])
+sys.modules["homeassistant.helpers"].entity_registry = _er
 _mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object,
      async_get_current_platform=lambda: _Platform())
 _mod("homeassistant.util")

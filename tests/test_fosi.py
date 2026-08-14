@@ -10,6 +10,7 @@ code under test is the code that ships.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import pathlib
 import re
@@ -28,6 +29,8 @@ from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
+from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
+from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
     MediaPlayerState,
@@ -41,6 +44,8 @@ from fosi_audio.entity import (  # noqa: E402
     match_source,
     model_name,
     selectable,
+    streaming_protocol,
+    streaming_service,
 )
 
 SOURCES = const.DEFAULT_SOURCES
@@ -116,6 +121,7 @@ class FakeCoordinator:
         self.client = FakeClient()
         self.volume_map = []
         self.last_updated = None
+        self.last_update_success = True
 
     def async_set_updated_data(self, data) -> None:
         self.data = data
@@ -500,37 +506,22 @@ def test_now_playing_extraction() -> None:
 
 
 def test_controls_drive_features() -> None:
-    print("\n== controls object gates supported_features ==")
+    """Features follow the device's `controls` object, as originally shipped.
+
+    Three attempts at pinning the button row to a fixed shape all failed in
+    Home Assistant, so this reports exactly what the device says the current
+    source supports and nothing more.
+    """
+    print("\n== controls gates supported_features ==")
     F = MediaPlayerEntityFeature
     live = FakePlayer(player=LIVE_PAYLOAD).supported_features
     R.check("pause grants PLAY", bool(live & F.PLAY), True)
     R.check("pause grants PAUSE", bool(live & F.PAUSE), True)
     R.check("next_ grants NEXT_TRACK", bool(live & F.NEXT_TRACK), True)
     R.check("previous grants PREVIOUS_TRACK", bool(live & F.PREVIOUS_TRACK), True)
-    R.check("no seek advertised", bool(live & F.SEEK), False)
-    # controls is not exhaustive: stop is accepted on a Cast source that does
-    # not list it, verified on hardware, so it is offered whenever a player is
-    # running rather than gated strictly.
-    R.check("stop offered despite not being listed", bool(live & F.STOP), True)
-
-    print("\n-- empty object means unsupported, not supported --")
-    # Cast reports "playMode": {}. Gating on key presence advertised
-    # shuffle/repeat buttons that the device rejected with
-    # "Play mode is not supported". Caught on hardware.
-    R.check("empty playMode grants no SHUFFLE_SET", bool(live & F.SHUFFLE_SET), False)
-    R.check("empty playMode grants no REPEAT_SET", bool(live & F.REPEAT_SET), False)
-    real = FakePlayer(player={"controls": {"playMode": {"shuffle": True}}})
-    R.check(
-        "populated playMode grants SHUFFLE_SET",
-        bool(real.supported_features & F.SHUFFLE_SET),
-        True,
-    )
-    false_valued = FakePlayer(player={"controls": {"next_": False}})
-    R.check(
-        "next_: false grants nothing",
-        bool(false_valued.supported_features & F.NEXT_TRACK),
-        False,
-    )
+    # controls under-reports: stop is accepted on a Cast source that never
+    # lists it, verified on hardware.
+    R.check("stop offered whenever a player runs", bool(live & F.STOP), True)
 
     print("\n-- the trailing-underscore trap --")
     wrong = FakePlayer(player={"controls": {"next": True}}).supported_features
@@ -540,12 +531,29 @@ def test_controls_drive_features() -> None:
     right = FakePlayer(player={"controls": {"next_": True}}).supported_features
     R.check("'next_' grants NEXT_TRACK", bool(right & F.NEXT_TRACK), True)
 
-    print("\n-- no controls -> no transport --")
+    print("\n-- values matter, not just keys --")
+    false_valued = FakePlayer(player={"controls": {"next_": False}})
+    R.check(
+        "next_: false grants nothing",
+        bool(false_valued.supported_features & F.NEXT_TRACK),
+        False,
+    )
+
+    print("\n-- no player -> no transport --")
     none = FakePlayer(player=STOPPED_PAYLOAD).supported_features
-    for name in ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK", "SEEK"):
+    for name in ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK"):
         R.check(f"no {name}", bool(none & getattr(F, name)), False)
-    R.check("not even stop without a player", bool(none & F.STOP), False)
     R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
+
+    print("\n-- seek and play modes were dropped entirely --")
+    for name in ("SEEK", "SHUFFLE_SET", "REPEAT_SET"):
+        R.check(f"{name} never advertised", bool(live & getattr(F, name)), False)
+    seekish = FakePlayer(player={"controls": {"seek": True, "playMode": {"x": 1}}})
+    R.check(
+        "not even when the device offers them",
+        bool(seekish.supported_features & (F.SEEK | F.SHUFFLE_SET | F.REPEAT_SET)),
+        False,
+    )
 
 
 def test_transport_commands() -> None:
@@ -585,32 +593,10 @@ def test_transport_commands() -> None:
     R.check("previous", p.sent[-1], (CTRL, {"control": "previous"}, "activate"))
     asyncio.run(p.async_media_stop())
     R.check("stop", p.sent[-1], (CTRL, {"control": "stop"}, "activate"))
-    asyncio.run(p.async_media_seek(42.5))
-    R.check("absolute seek in ms", p.sent[-1],
-            (CTRL, {"control": "seekTime", "time": 42500}, "activate"))
-    asyncio.run(p.async_seek_relative(-30))
-    R.check("relative seek in ms", p.sent[-1],
-            (CTRL, {"control": "seekTime", "timeRelative": -30000}, "activate"))
-
-
-def test_play_modes() -> None:
-    print("\n== shuffle and repeat round-trip all six modes ==")
-    for (shuffle, repeat), mode in const.PLAY_MODES.items():
-        p = FakePlayer(play_mode=mode)
-        R.check(f"{mode!r} -> shuffle={shuffle}", p.shuffle, shuffle)
-        R.check(f"{mode!r} -> repeat={repeat}", str(p.repeat), repeat)
-
-    print("\n-- writing recombines both halves --")
-    p = FakePlayer(player=LIVE_PAYLOAD, play_mode="repeatAll")
-    asyncio.run(p.async_set_shuffle(True))
-    R.check("shuffle on keeps repeatAll", p.sent[-1][1],
-            {"control": "changePlayMode", "playMode": "shuffleRepeatAll"})
-    p2 = FakePlayer(player=LIVE_PAYLOAD, play_mode="shuffle")
-    asyncio.run(p2.async_set_repeat(stubs.RepeatMode("one")))
-    R.check("repeat one keeps shuffle", p2.sent[-1][1],
-            {"control": "changePlayMode", "playMode": "shuffleRepeatOne"})
     R.check(
-        "unknown mode -> no shuffle reported", FakePlayer(play_mode="?").shuffle, None
+        "seek was removed with the rest",
+        hasattr(p, "async_media_seek"),
+        False,
     )
 
 
@@ -619,15 +605,9 @@ def test_conditional_polling() -> None:
     skip = FosiCoordinator._skip
     playing = {"player": LIVE_PAYLOAD}
     R.check("play_time polled while playing", skip("play_time", playing), False)
-    # Cast reports "playMode": {} - present but unsupported, so do not spend a
-    # round trip on it every cycle.
-    R.check("play_mode skipped when empty", skip("play_mode", playing), True)
-    supported = {"player": {"controls": {"playMode": {"shuffle": True}}}}
-    R.check("play_mode polled when populated", skip("play_mode", supported), False)
 
     stopped = {"player": STOPPED_PAYLOAD}
     R.check("play_time skipped when stopped", skip("play_time", stopped), True)
-    R.check("play_mode skipped without controls", skip("play_mode", stopped), True)
 
     R.check("skipped when no player at all", skip("play_time", {"player": None}), True)
     R.check("never skips the core keys", skip("volume", {}), False)
@@ -669,9 +649,11 @@ def test_network_service_attribute() -> None:
     e = FakeSourceEntity(0)
     e.coordinator.data["player"] = LIVE_PAYLOAD
     R.check("input option stays stable", e._active_source, "Network")
+    R.check("protocol surfaced separately", e._network_protocol, "Google Cast")
     R.check("service surfaced separately", e._network_service, "YouTube Music")
-    R.check("attribute present", e.extra_state_attributes["network_service"],
-            "YouTube Music")
+    attrs = e.extra_state_attributes
+    R.check("protocol attribute", attrs["network_protocol"], "Google Cast")
+    R.check("service attribute", attrs["network_service"], "YouTube Music")
 
     idle = FakeSourceEntity(3)
     R.check("no player -> no service", idle._network_service, None)
@@ -721,6 +703,160 @@ def test_event_parsing() -> None:
     R.check("all itemWithValue", {s["type"] for s in subs}, {"itemWithValue"})
 
 
+def test_streaming_service() -> None:
+    """Protocol and service are separate things and get separate sensors.
+
+    Protocol is how audio arrives - Google Cast, AirPlay, Spotify Connect.
+    Service is what is playing it - YouTube Music, Spotify, Apple Music.
+    Reporting one field for both gave "AirPlay" in one case and "YouTube
+    Music" in another, which nothing can be written against.
+    """
+    print("\n== protocol and service are distinguished ==")
+
+    def meta(**fields):
+        return {"trackRoles": {"mediaData": {"metaData": fields}}}
+
+    cases = [
+        # payload, protocol, service
+        (LIVE_PAYLOAD, "Google Cast", "YouTube Music"),
+        (
+            meta(serviceID="googlecast", externalAppName="Apple Music"),
+            "Google Cast",
+            "Apple Music",
+        ),
+        # AirPlay names no app, so the service is genuinely unknown there.
+        (meta(serviceID="airplay", serviceName="AirPlay"), "AirPlay", None),
+        # Connect protocols only carry one service, so it is implied.
+        (meta(serviceID="spotifyconnect"), "Spotify Connect", "Spotify"),
+        (meta(serviceID="tidalconnect"), "Tidal Connect", "Tidal"),
+        (meta(serviceID="roon"), "Roon", "Roon"),
+    ]
+    for payload, protocol, service in cases:
+        label = protocol or "idle"
+        R.check(f"{label}: protocol", streaming_protocol(payload), protocol)
+        R.check(f"{label}: service", streaming_service(payload), service)
+
+    print("\n-- edges --")
+    R.check(
+        "unknown protocol is title-cased, not dropped",
+        streaming_protocol(meta(serviceID="deezer")),
+        "Deezer",
+    )
+    R.check(
+        "unknown protocol implies no service",
+        streaming_service(meta(serviceID="deezer")),
+        None,
+    )
+    R.check(
+        "serviceName only, no id",
+        streaming_protocol(meta(serviceName="Roon")),
+        "Roon",
+    )
+    for fn, name in ((streaming_protocol, "protocol"), (streaming_service, "service")):
+        R.check(f"stopped -> no {name}", fn(STOPPED_PAYLOAD), None)
+        R.check(f"no player -> no {name}", fn(None), None)
+        R.check(f"garbage -> no {name}", fn("nope"), None)
+    R.check(
+        "whitespace only -> None",
+        streaming_protocol(meta(serviceID="  ")),
+        None,
+    )
+
+    print("\n-- the entities --")
+    R.check("two of them", [d.key for d in SENSORS],
+            ["streaming_protocol", "streaming_service"])
+
+    def sensor(description, player):
+        s = FosiPlayerSensor.__new__(FosiPlayerSensor)
+        s.entity_description = description
+        s.coordinator = FakeCoordinator()
+        s.coordinator.data = {"player": player}
+        return s
+
+    protocol_desc, service_desc = SENSORS
+    R.check("protocol state", sensor(protocol_desc, LIVE_PAYLOAD).native_value,
+            "Google Cast")
+    R.check("service state", sensor(service_desc, LIVE_PAYLOAD).native_value,
+            "YouTube Music")
+
+    attrs = sensor(protocol_desc, LIVE_PAYLOAD).extra_state_attributes
+    R.check("service_id is the machine-readable one", attrs["service_id"], "googlecast")
+    R.check("service_name", attrs["service_name"], "Casting YouTube Music")
+    R.check("app_name", attrs["app_name"], "YouTube Music")
+
+    idle = sensor(service_desc, STOPPED_PAYLOAD)
+    R.check("idle state is None, not a placeholder", idle.native_value, None)
+    R.check("idle attrs are None", idle.extra_state_attributes["service_id"], None)
+
+
+
+def test_zeroconf_matcher() -> None:
+    """The manifest matcher must not claim every Cast device on the network.
+
+    Real `md` values captured by browsing _googlecast._tcp on a household
+    with four Cast devices.
+    """
+    print("\n== zeroconf matcher is narrow enough ==")
+    manifest = json.loads(
+        (HERE.parent / "custom_components" / "fosi_audio" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matchers = manifest.get("zeroconf") or []
+    R.check("declares zeroconf", bool(matchers), True)
+    R.check(
+        "all target the cast service",
+        {m["type"] for m in matchers},
+        {"_googlecast._tcp.local."},
+    )
+    R.check(
+        "none match on type alone",
+        all(m.get("properties") for m in matchers),
+        True,
+    )
+
+    def matches(md: str) -> bool:
+        return any(
+            fnmatch.fnmatch(md.lower(), m["properties"]["md"].lower())
+            for m in matchers
+        )
+
+    R.check("matches the S3", matches("S3"), True)
+    R.check("would match an S3 Lite", matches("S3 Lite"), True)
+    R.check("would match an S5", matches("S5"), True)
+    print("\n-- and rejects the neighbours, captured from a real network --")
+    neighbours = (
+        "Google Nest Hub",
+        "Google Home Mini",
+        "Chromecast",
+        "Google Cast Group",
+    )
+    for md in neighbours:
+        R.check(f"ignores {md!r}", matches(md), False)
+
+
+def test_diagnostics_redaction() -> None:
+    print("\n== diagnostics redact identifying values ==")
+    R.check(
+        "serial, mac and name are redacted",
+        {"serial", "mac", "name"} <= diag.REDACT,
+        True,
+    )
+    identity = {
+        "model": "Fosi S3",
+        "manufacturer": "Fosi Audio",
+        "serial": "S3304CAGA1797",
+        "mac": "50:1E:2D:95:1B:F4",
+        "name": "Living room reciever",
+    }
+    redacted = stubs.async_redact_data(identity, diag.REDACT)
+    R.check("serial hidden", redacted["serial"], "**REDACTED**")
+    R.check("mac hidden", redacted["mac"], "**REDACTED**")
+    R.check("room name hidden", redacted["name"], "**REDACTED**")
+    R.check("model kept - it is the whole point", redacted["model"], "Fosi S3")
+    R.check("manufacturer kept", redacted["manufacturer"], "Fosi Audio")
+
+
 def main() -> int:
     for test in (
         test_packaging_metadata,
@@ -733,11 +869,13 @@ def main() -> int:
         test_now_playing_extraction,
         test_controls_drive_features,
         test_transport_commands,
-        test_play_modes,
         test_conditional_polling,
         test_event_parsing,
         test_position_timestamp,
         test_network_service_attribute,
+        test_streaming_service,
+        test_zeroconf_matcher,
+        test_diagnostics_redaction,
         test_model_name,
         test_volume_scale,
         test_optimistic_updates,

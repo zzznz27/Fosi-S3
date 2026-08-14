@@ -14,7 +14,6 @@ from homeassistant.util import dt as dt_util
 
 from .api import NsdkClient, NsdkConnectionError, NsdkError, NsdkPathError
 from .const import (
-    CONTROL_KEY_PLAY_MODE,
     DEFAULT_VOLUME_STEPS,
     DOMAIN,
     PLAYER_STATE_PLAYING,
@@ -185,17 +184,12 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         device that is often slow. Relies on POLL_PATHS reading "player"
         first.
         """
-        if key not in ("play_time", "play_mode"):
+        if key != "play_time":
             return False
         player = data.get("player")
         if not isinstance(player, dict):
             return True
-        if key == "play_time":
-            return player.get("state") != PLAYER_STATE_PLAYING
-        # Truthiness, not key presence: a Cast source reports "playMode": {},
-        # meaning the key exists but play modes are not supported.
-        controls = player.get("controls") or {}
-        return not controls.get(CONTROL_KEY_PLAY_MODE)
+        return player.get("state") != PLAYER_STATE_PLAYING
 
     # ------------------------------------------------------------ mapping
 

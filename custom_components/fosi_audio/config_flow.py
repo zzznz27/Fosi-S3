@@ -18,6 +18,7 @@ from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .api import NsdkClient, NsdkConnectionError, NsdkError, NsdkUnsupportedError
 from .const import (
@@ -69,6 +70,10 @@ class FosiConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        self._discovered_host: str = ""
+        self._discovered_name: str = ""
+
     async def _async_probe(
         self, host: str
     ) -> tuple[dict[str, Any] | None, str | None]:
@@ -110,6 +115,53 @@ class FosiConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors
+        )
+
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> ConfigFlowResult:
+        """Offer a device found over Cast's mDNS advertisement.
+
+        The manifest matches on the Cast `md` (model) property, which narrows
+        _googlecast._tcp down but does not prove anything - "S3" is a name
+        another vendor could use, and a household typically has several Cast
+        devices. So confirm over the nSDK API before showing the user
+        anything; an abort here never reaches the UI.
+        """
+        host = str(discovery_info.host)
+        info, error = await self._async_probe(host)
+        if error:
+            return self.async_abort(reason=error)
+
+        mac = info.get("mac")
+        await self.async_set_unique_id(dr.format_mac(str(mac)) if mac else host)
+        # Also follows the device to a new address if DHCP moved it.
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        self._discovered_host = host
+        self._discovered_name = str(
+            info.get("name")
+            or discovery_info.properties.get("fn")
+            or info.get("model")
+            or host
+        )
+        # Shown on the discovery card in the UI.
+        self.context["title_placeholders"] = {"name": self._discovered_name}
+        return await self.async_step_zeroconf_confirm()
+
+    async def async_step_zeroconf_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask before adding a device we found rather than adding it silently."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self._discovered_name,
+                data={CONF_HOST: self._discovered_host},
+            )
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="zeroconf_confirm",
+            description_placeholders={"name": self._discovered_name},
         )
 
     async def async_step_reconfigure(

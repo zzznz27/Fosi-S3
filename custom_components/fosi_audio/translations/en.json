@@ -14,6 +14,10 @@
         "data": {
           "host": "Host"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Fosi Audio",
+        "description": "Add {name}?"
       }
     },
     "error": {
@@ -23,7 +27,9 @@
     "abort": {
       "already_configured": "This device is already configured.",
       "reconfigure_successful": "Address updated.",
-      "wrong_device": "That address is a different device. Add it as a new integration instead."
+      "wrong_device": "That address is a different device. Add it as a new integration instead.",
+      "not_streamsdk": "Responded, but does not look like a StreamSDK device.",
+      "cannot_connect": "Could not reach the discovered device."
     }
   },
   "options": {
@@ -45,18 +51,6 @@
       "invalid_sources": "Not valid JSON, or an entry is missing a 'path' or 'state'."
     }
   },
-  "services": {
-    "seek_relative": {
-      "name": "Seek relative",
-      "description": "Jump forward or backward from the current position.",
-      "fields": {
-        "offset": {
-          "name": "Offset",
-          "description": "Seconds to jump. Negative values seek backwards."
-        }
-      }
-    }
-  },
   "entity": {
     "select": {
       "input": {
@@ -64,6 +58,14 @@
       },
       "output_mode": {
         "name": "Output mode"
+      }
+    },
+    "sensor": {
+      "streaming_protocol": {
+        "name": "Streaming protocol"
+      },
+      "streaming_service": {
+        "name": "Streaming service"
       }
     }
   }
