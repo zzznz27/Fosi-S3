@@ -633,6 +633,37 @@ def test_conditional_polling() -> None:
     R.check("never skips the core keys", skip("volume", {}), False)
 
 
+def test_position_timestamp() -> None:
+    """media_position_updated_at has to move whenever the position does.
+
+    The device pushes playTime about once a second and every push resets the
+    coordinator's poll timer, so the scheduled poll never runs while music is
+    playing. Stamping the timestamp only in the poll left it frozen, and HA
+    added the elapsed wall-clock to a correct position - the progress bar ran
+    minutes past the end of the track.
+    """
+    print("\n== position timestamp tracks the position ==")
+    co = FakeCoordinator()
+    co.data = {}
+    R.check("starts unstamped", co.last_updated, None)
+
+    co.apply_update(volume=40)
+    R.check("unrelated update does not stamp", co.last_updated, None)
+
+    co.apply_update(play_time=1000)
+    stamped = co.last_updated
+    R.check("play_time stamps it", stamped is not None, True)
+
+    co.apply_update(mute=True)
+    R.check("still not restamped by others", co.last_updated, stamped)
+
+    print("\n-- and the player reports it --")
+    p = FakePlayer(player=LIVE_PAYLOAD, play_time=90000)
+    p.coordinator.last_updated = stamped
+    R.check("position in seconds", p.media_position, 90.0)
+    R.check("timestamp exposed", p.media_position_updated_at, stamped)
+
+
 def test_network_service_attribute() -> None:
     print("\n== network service exposed without destabilising the input ==")
     e = FakeSourceEntity(0)
@@ -705,6 +736,7 @@ def main() -> int:
         test_play_modes,
         test_conditional_polling,
         test_event_parsing,
+        test_position_timestamp,
         test_network_service_attribute,
         test_model_name,
         test_volume_scale,

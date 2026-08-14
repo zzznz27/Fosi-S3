@@ -118,6 +118,15 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         data = dict(self.data or {})
         data.update(values)
+        if "play_time" in values:
+            # media_position_updated_at must move with the position. The
+            # device pushes playTime about once a second, and every push
+            # calls async_set_updated_data, which resets the poll timer - so
+            # while something is playing _async_update_data may never run.
+            # Stamping only there left the timestamp frozen at setup and Home
+            # Assistant extrapolated from it, running the progress bar way
+            # past the end of the track.
+            self.last_updated = dt_util.utcnow()
         self.async_set_updated_data(data)
 
     def apply_optimistic(self, **values: Any) -> None:
