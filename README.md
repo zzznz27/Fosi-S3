@@ -144,7 +144,14 @@ From **Configure** on the integration card. No YAML.
 **Poll interval** (default 60s) — only a safety net. The device pushes changes
 over its event API, so track changes, input switches from the remote and knob
 turns all appear within a fraction of a second. Polling exists so that a
-dropped event stream degrades to slow updates rather than stale ones.
+dropped event stream degrades to slow updates rather than stale ones, and it
+only ever fills in values the stream has not supplied — a poll never overwrites
+something newer that arrived while it was running.
+
+The event subscription is also rebuilt every 15 minutes regardless of health.
+A queue can stop delivering without reporting any error, and from the outside
+that is indistinguishable from a device with nothing to say, so it is replaced
+on a timer rather than waiting for a symptom.
 
 **Source map** — the input list is configuration, so other StreamSDK hardware
 can be supported without touching code:

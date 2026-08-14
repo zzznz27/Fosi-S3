@@ -59,12 +59,12 @@ DEFAULT_SOURCES: Final[dict[str, dict]] = {
     "Network": {"state": 0},
 }
 
-# Nodes polled every update. Missing nodes are tolerated and reported as None.
+# Nodes polled every update. A node the device does not have is dropped from
+# the poll rather than reported as None, so a missing one leaves whatever the
+# event stream last supplied intact.
+#
 # Keep this list short: every entry is one HTTP round trip per cycle against a
 # small embedded webserver that is often slow to answer.
-#
-# Order matters: "player" must be read before "play_time", which the
-# coordinator skips based on what the player just reported.
 POLL_PATHS: Final[dict[str, str]] = {
     "source": SOURCE_STATE_PATH,
     "mute": "settings:/mediaPlayer/mute",

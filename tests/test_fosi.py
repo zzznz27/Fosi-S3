@@ -28,6 +28,7 @@ from fosi_audio import api, const  # noqa: E402
 from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
+from fosi_audio import events as events_mod  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
 from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
@@ -114,6 +115,7 @@ class FakeCoordinator:
     apply_optimistic = FosiCoordinator.apply_optimistic
     volume_to_level = FosiCoordinator.volume_to_level
     level_to_volume = FosiCoordinator.level_to_volume
+    volume_to_db = FosiCoordinator.volume_to_db
     volume_steps = FosiCoordinator.volume_steps
 
     def __init__(self, source=0) -> None:
@@ -123,6 +125,8 @@ class FakeCoordinator:
         self.volume_map = []
         self.last_updated = None
         self.last_update_success = True
+        self._poll_in_flight = False
+        self._pushed_during_poll = set()
         # async_set_updated_data reschedules the poll; async_update_listeners
         # does not. Which one gets called is the whole point of the fix.
         self.reschedules = 0
@@ -627,17 +631,156 @@ def test_transport_commands() -> None:
     )
 
 
-def test_conditional_polling() -> None:
-    print("\n== player extras are skipped when meaningless ==")
-    skip = FosiCoordinator._skip
-    playing = {"player": LIVE_PAYLOAD}
-    R.check("play_time polled while playing", skip("play_time", playing), False)
+class PollClient:
+    """A client whose reads can be scripted, including failures.
 
-    stopped = {"player": STOPPED_PAYLOAD}
-    R.check("play_time skipped when stopped", skip("play_time", stopped), True)
+    on_read fires before each read resolves, which is how a test drops an
+    event into the middle of a poll.
+    """
 
-    R.check("skipped when no player at all", skip("play_time", {"player": None}), True)
-    R.check("never skips the core keys", skip("volume", {}), False)
+    def __init__(self, values, on_read=None) -> None:
+        self.values = values
+        self.on_read = on_read
+        self.reads: list[str] = []
+
+    async def read(self, path):
+        self.reads.append(path)
+        if self.on_read is not None:
+            self.on_read(path)
+        value = self.values.get(path)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def poll_coordinator(client, data=None):
+    """A real FosiCoordinator with only the poll's dependencies filled in."""
+    co = FosiCoordinator.__new__(FosiCoordinator)
+    co.client = client
+    co.data = dict(data or {})
+    co.volume_map = []
+    co.last_updated = None
+    co.last_update_success = True
+    co._volume_map_settled = True
+    co._dead_paths = set()
+    co._poll_in_flight = False
+    co._pushed_during_poll = set()
+    co.async_update_listeners = lambda: None
+    return co
+
+
+def test_poll_merges_rather_than_replacing() -> None:
+    """The poll must never wipe a key it could not supply this cycle.
+
+    Home Assistant assigns _async_update_data's return value straight onto
+    coordinator.data, so a bare dict of "what this cycle read" silently
+    deletes everything it did not. Three ways that bit:
+
+      - a failed read published None, which dropped VOLUME_SET out of
+        supported_features and took the slider off the card for a cycle
+      - a dead path published None forever
+      - an event arriving during the six sequential reads was reverted to
+        whatever the poll had already read, and stayed wrong until the next
+        one
+    """
+    print("\n== the poll merges into what is already known ==")
+    live = {path: 0 for path in const.POLL_PATHS.values()}
+
+    print("\n-- a transient failure leaves the previous value alone --")
+    failing = dict(live)
+    failing[const.VOLUME_PATH] = api.NsdkError("HTTP 503 busy")
+    co = poll_coordinator(PollClient(failing), data={"volume": 40})
+    data = asyncio.run(co._async_update_data())
+    R.check("volume survives a failed read", data["volume"], 40)
+    R.check("slider stays offered", data.get("volume") is not None, True)
+
+    print("\n-- and so does a node this firmware does not have --")
+    absent = dict(live)
+    absent[const.OUTPUT_MODE_PATH] = NsdkPathError("does not exist")
+    co = poll_coordinator(PollClient(absent), data={"output_mode": True})
+    data = asyncio.run(co._async_update_data())
+    R.check("dead path does not null the value", data["output_mode"], True)
+    R.check("path recorded as dead", const.OUTPUT_MODE_PATH in co._dead_paths, True)
+
+    print("\n-- an event landing mid-poll is newer, so the poll yields --")
+    # The poll reads source first and gets 0. While it is still working
+    # through the other five nodes, the device pushes source=3.
+    def push_once(path):
+        if path == const.POLL_PATHS["mute"]:
+            co.apply_update(source=3)
+
+    co = poll_coordinator(PollClient(live, on_read=push_once), data={"source": 0})
+    data = asyncio.run(co._async_update_data())
+    R.check("event wins over the older polled value", data["source"], 3)
+    R.check("other keys still come from the poll", data["volume"], 0)
+
+    print("\n-- an optimistic write is not clobbered either --")
+    def command_once(path):
+        if path == const.POLL_PATHS["mute"]:
+            co.data = co._merge({"volume": 70})
+
+    co = poll_coordinator(PollClient(live, on_read=command_once), data={"volume": 20})
+    data = asyncio.run(co._async_update_data())
+    R.check("slider does not snap back", data["volume"], 70)
+
+
+def test_volume_db_attribute() -> None:
+    """README documents volume_db, so something has to assert it exists.
+
+    It was documented for two releases without being implemented - the
+    coordinator could compute it and nothing ever exposed it.
+    """
+    print("\n== volume_db explains the steep curve ==")
+    p = FakePlayer(volume=52)
+    p.coordinator.volume_map = [float(-120 + n) for n in range(101)]
+    attrs = p.extra_state_attributes
+    R.check("dB exposed", attrs["volume_db"], -68.0)
+    R.check("source attributes still there", attrs["active_source"], "Network")
+
+    print("\n-- and degrades quietly with no curve to read --")
+    p.coordinator.volume_map = []
+    R.check("no curve, no dB", p.extra_state_attributes["volume_db"], None)
+
+
+def test_pushes_restore_availability() -> None:
+    """A push proves the device is reachable and must clear the failed flag.
+
+    CoordinatorEntity.available is coordinator.last_update_success and
+    nothing else. apply_update deliberately avoids async_set_updated_data to
+    keep from starving the poll - but that method was also the only thing
+    setting the flag, so after one failed poll every entity stayed greyed out
+    while correct data streamed in behind it.
+    """
+    print("\n== a pushed event clears the unavailable flag ==")
+    co = FakeCoordinator()
+    co.data = {}
+    co.last_update_success = False
+
+    co.apply_update(volume=40)
+    R.check("available again", co.last_update_success, True)
+    R.check("still no reschedule", co.reschedules, 0)
+
+
+def test_event_queue_is_recycled() -> None:
+    """A queue that stops delivering never errors, so it is replaced on age.
+
+    pollQueue keeps answering with nothing, which is exactly what an idle
+    system looks like - there is no failure to react to and silence cannot be
+    the signal. Rebuilding on a timer needs no heuristic, and unlike watching
+    for the poll and the stream to disagree it cannot be fooled by an
+    optimistic write the device has not reflected yet.
+    """
+    print("\n== the event queue is recycled on age ==")
+    expired = FosiEventListener.expired
+    R.check("fresh queue kept", expired(1000.0, 1000.0), False)
+    R.check("still kept just under the limit", expired(1000.0, 1899.0), False)
+    R.check("recycled at the limit", expired(1000.0, 1900.0), True)
+    R.check("and well past it", expired(1000.0, 5000.0), True)
+    R.check(
+        "long enough to be cheap",
+        events_mod.QUEUE_MAX_AGE >= 300,
+        True,
+    )
 
 
 def test_events_do_not_starve_the_poll() -> None:
@@ -952,7 +1095,10 @@ def main() -> int:
         test_now_playing_extraction,
         test_controls_drive_features,
         test_transport_commands,
-        test_conditional_polling,
+        test_poll_merges_rather_than_replacing,
+        test_volume_db_attribute,
+        test_pushes_restore_availability,
+        test_event_queue_is_recycled,
         test_event_parsing,
         test_events_do_not_starve_the_poll,
         test_position_timestamp,

@@ -16,7 +16,6 @@ from .api import NsdkClient, NsdkConnectionError, NsdkError, NsdkPathError
 from .const import (
     DEFAULT_VOLUME_STEPS,
     DOMAIN,
-    PLAYER_STATE_PLAYING,
     POLL_PATHS,
     VOLUME_MAP_PATH,
 )
@@ -54,6 +53,9 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.volume_map: list[float] = []
         # When the last successful poll landed, for media_position_updated_at.
         self.last_updated: datetime | None = None
+        # Keys that arrived while a poll was mid-flight - see _merge.
+        self._poll_in_flight = False
+        self._pushed_during_poll: set[str] = set()
         # False until we know whether this device has a usable volume curve.
         # A read that merely timed out must not be mistaken for "no curve".
         self._volume_map_settled = False
@@ -116,6 +118,11 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Assistant extrapolates from a stale stamp and runs the progress
             # bar past the end of the track.
             self.last_updated = dt_util.utcnow()
+        if self._poll_in_flight:
+            # A poll is part-way through reading these same nodes. Whatever it
+            # already read is older than what just arrived, so record the keys
+            # and let it leave them alone rather than reverting them.
+            self._pushed_during_poll.update(values)
         return data
 
     def apply_update(self, **values: Any) -> None:
@@ -135,6 +142,12 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         which is the whole reason it is still here.
         """
         self.data = self._merge(values)
+        # A push is proof the device is reachable, so it has to clear the
+        # unavailable flag as well. CoordinatorEntity.available is exactly
+        # this attribute: without the line, one failed poll greys out every
+        # entity and they stay grey - with fresh data streaming in behind
+        # them - until a whole scan interval later a poll happens to succeed.
+        self.last_update_success = True
         self.async_update_listeners()
 
     def apply_optimistic(self, **values: Any) -> None:
@@ -157,46 +170,46 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.volume_map and not self._volume_map_settled:
             await self._async_load_volume_map()
 
-        data: dict[str, Any] = {}
-        # Sequential on purpose. This is a small embedded webserver and the
-        # settings tree is not worth hammering with concurrent requests.
-        for key, path in POLL_PATHS.items():
-            if path in self._dead_paths or self._skip(key, data):
-                data[key] = None
-                continue
-            try:
-                data[key] = await self.client.read(path)
-            except NsdkPathError:
-                _LOGGER.debug("Node %s absent on this firmware; skipping", path)
-                self._dead_paths.add(path)
-                data[key] = None
-            except NsdkConnectionError as exc:
-                # One unreachable node means the whole device is gone.
-                raise UpdateFailed(str(exc)) from exc
-            except NsdkError as exc:
-                _LOGGER.debug("Read of %s failed: %s", path, exc)
-                data[key] = None
+        polled: dict[str, Any] = {}
+        self._pushed_during_poll.clear()
+        self._poll_in_flight = True
+        try:
+            # Sequential on purpose. This is a small embedded webserver and the
+            # settings tree is not worth hammering with concurrent requests.
+            for key, path in POLL_PATHS.items():
+                if path in self._dead_paths:
+                    continue
+                try:
+                    polled[key] = await self.client.read(path)
+                except NsdkPathError:
+                    _LOGGER.debug("Node %s absent on this firmware; skipping", path)
+                    self._dead_paths.add(path)
+                except NsdkConnectionError as exc:
+                    # One unreachable node means the whole device is gone.
+                    raise UpdateFailed(str(exc)) from exc
+                except NsdkError as exc:
+                    # Leave the key out entirely. A single failed read is not
+                    # news about the value, and publishing None for it made
+                    # supported_features drop VOLUME_SET - so the slider
+                    # vanished off the card for a cycle and came back.
+                    _LOGGER.debug("Read of %s failed: %s", path, exc)
+        finally:
+            self._poll_in_flight = False
 
+        # Anything pushed while we were reading is newer than what we read.
+        for key in self._pushed_during_poll:
+            polled.pop(key, None)
+
+        # Merge rather than replace. Home Assistant assigns this return value
+        # straight onto self.data, so returning a bare dict of what this cycle
+        # happened to read would wipe every key it could not supply - a dead
+        # path, a failed read, or a value an event delivered while the six
+        # sequential reads above were still in flight.
+        data = self._merge(polled)
         # Timestamp so media_position can be extrapolated between polls; the
         # progress bar sticks without it.
         self.last_updated = dt_util.utcnow()
         return data
-
-    @staticmethod
-    def _skip(key: str, data: dict[str, Any]) -> bool:
-        """Whether this cycle can skip a request.
-
-        Both player extras are meaningless unless something is actually
-        playing, and every skipped key is one fewer round trip against a
-        device that is often slow. Relies on POLL_PATHS reading "player"
-        first.
-        """
-        if key != "play_time":
-            return False
-        player = data.get("player")
-        if not isinstance(player, dict):
-            return True
-        return player.get("state") != PLAYER_STATE_PLAYING
 
     # ------------------------------------------------------------ mapping
 
