@@ -19,12 +19,11 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
-| `sensor.<name>_streaming_service` | Which app is streaming — YouTube Music, Spotify, AirPlay |
+| `sensor.<name>_streaming_service` | Which protocol is streaming — Google Cast, AirPlay, Roon |
 
-Transport covers play/pause, next, previous, stop and — where the source
-supports it — seek and shuffle/repeat. It works for whatever is streaming,
-including AirPlay, Spotify Connect, Tidal Connect and Bluetooth, none of which
-Home Assistant can otherwise control.
+Transport covers play/pause, next, previous and stop. It works for whatever is
+streaming, including AirPlay, Spotify Connect, Tidal Connect and Bluetooth,
+none of which Home Assistant can otherwise control.
 
 Now-playing gives title, artist, album, artwork and position.
 
@@ -35,8 +34,7 @@ press on the remote shows up in well under a second.
 
 The device reports which transport actions the current source supports, and
 the entity advertises only those. So HDMI, optical and line-in get no
-transport buttons at all — there is no player behind them — and a Cast stream
-gets play/pause, next, previous and stop but not seek.
+transport buttons at all — there is no player behind them.
 
 Volume and mute likewise only appear if the device answers on those nodes. The
 entity degrades rather than offering controls that fail.
@@ -154,19 +152,6 @@ can be supported without touching code:
 | `state` | What `settings:/custom/lastAudioSource` reads when this input is live. |
 
 Leave the field blank to restore the defaults.
-
-## Services
-
-**`fosi_audio.seek_relative`** — jump forward or back from the current
-position, since Home Assistant's built-in seek is absolute only.
-
-```yaml
-action: fosi_audio.seek_relative
-target:
-  entity_id: media_player.living_room
-data:
-  offset: -30        # seconds; negative seeks backwards
-```
 
 ## Using it alongside Cast
 

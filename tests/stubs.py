@@ -155,6 +155,10 @@ _dr = _mod("homeassistant.helpers.device_registry", DeviceInfo=DeviceInfo,
 sys.modules["homeassistant.helpers"].device_registry = _dr
 _mod("homeassistant.helpers.aiohttp_client",
      async_get_clientsession=lambda hass: ClientSession())
+_er = _mod("homeassistant.helpers.entity_registry",
+           async_get=lambda hass: None,
+           async_entries_for_config_entry=lambda reg, entry_id: [])
+sys.modules["homeassistant.helpers"].entity_registry = _er
 _mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object)
 _mod("homeassistant.helpers.update_coordinator",
      DataUpdateCoordinator=DataUpdateCoordinator, UpdateFailed=UpdateFailed,
@@ -206,6 +210,10 @@ class _Platform:
     def async_register_entity_service(self, *a, **kw): ...
 
 
+_er = _mod("homeassistant.helpers.entity_registry",
+           async_get=lambda hass: None,
+           async_entries_for_config_entry=lambda reg, entry_id: [])
+sys.modules["homeassistant.helpers"].entity_registry = _er
 _mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object,
      async_get_current_platform=lambda: _Platform())
 _mod("homeassistant.util")

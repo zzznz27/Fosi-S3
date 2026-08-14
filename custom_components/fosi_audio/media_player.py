@@ -5,36 +5,29 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
     MediaType,
-    RepeatMode,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import FosiConfigEntry
 from .api import NsdkError
 from .const import (
+    CONTROL_KEY_NEXT,
+    CONTROL_KEY_PAUSE,
     CONTROL_KEY_PLAY,
-    CONTROL_KEY_PLAY_MODE,
-    CONTROL_KEY_SEEK,
+    CONTROL_KEY_PREVIOUS,
     CONTROL_NEXT,
     CONTROL_PLAY,
-    CONTROL_PLAY_MODE,
     CONTROL_PREVIOUS,
-    CONTROL_SEEK,
     CONTROL_STOP,
     CONTROL_TOGGLE,
     MUTE_PATH,
-    PLAY_MODE_LOOKUP,
-    PLAY_MODES,
     PLAYER_CONTROL_PATH,
     PLAYER_STATE_PAUSED,
     PLAYER_STATE_PLAYING,
@@ -47,9 +40,6 @@ from .entity import FosiSourceEntity
 # All I/O goes through the coordinator, so HA need not serialise
 # entity updates.
 PARALLEL_UPDATES = 0
-
-SERVICE_SEEK_RELATIVE = "seek_relative"
-ATTR_OFFSET = "offset"
 
 STATE_MAP: dict[str, MediaPlayerState] = {
     PLAYER_STATE_PLAYING: MediaPlayerState.PLAYING,
@@ -99,14 +89,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     async_add_entities([FosiMediaPlayer(entry.runtime_data.coordinator, entry)])
-
-    # Home Assistant's own seek is absolute; the device also accepts a signed
-    # relative seek, which is worth exposing.
-    entity_platform.async_get_current_platform().async_register_entity_service(
-        SERVICE_SEEK_RELATIVE,
-        {vol.Required(ATTR_OFFSET): vol.Coerce(float)},
-        "async_seek_relative",
-    )
 
 
 class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
@@ -162,44 +144,26 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
                 | MediaPlayerEntityFeature.VOLUME_STEP
             )
 
-        # The transport row is ALWAYS advertised. Never gate it on anything.
-        #
-        # Home Assistant has no disabled state for transport buttons -
-        # supported_features is binary - so any condition at all makes the row
-        # change shape as playback changes. Two earlier attempts both failed
-        # on this: gating per-key moved buttons between playing and paused,
-        # because the device drops next_ while paused; gating on "is there a
-        # player" then collapsed the whole row when a Cast session ended,
-        # because `controls` disappears with it.
-        #
-        # Pressing one with no player raises a clear error rather than a
-        # device-level 500 - see _async_control.
-        features |= (
-            MediaPlayerEntityFeature.PLAY
-            | MediaPlayerEntityFeature.PAUSE
-            | MediaPlayerEntityFeature.STOP
-            | MediaPlayerEntityFeature.NEXT_TRACK
-            | MediaPlayerEntityFeature.PREVIOUS_TRACK
-        )
-
+        # Test the VALUE, not just the key. A Cast source reports
+        # "playMode": {} - the key is present but the empty object means
+        # unsupported, and sending changePlayMode there is rejected with
+        # "Play mode is not supported". Confirmed on hardware.
         controls = self._controls
-
-        # These stay honest, because they do not sit in the button row: SEEK
-        # makes the progress bar draggable, and the play modes render their
-        # own controls. Advertising those falsely would mislead rather than
-        # merely shift.
-        #
-        # Test the VALUE, not just the key: a Cast source reports
-        # "playMode": {}, where the key exists but the empty object means
-        # unsupported - changePlayMode there is rejected with "Play mode is
-        # not supported". Confirmed on hardware.
-        if controls.get(CONTROL_KEY_SEEK):
-            features |= MediaPlayerEntityFeature.SEEK
-        if controls.get(CONTROL_KEY_PLAY_MODE):
+        # One verb serves both directions, so "pause" grants PLAY and PAUSE.
+        if controls.get(CONTROL_KEY_PAUSE) or controls.get(CONTROL_KEY_PLAY):
             features |= (
-                MediaPlayerEntityFeature.SHUFFLE_SET
-                | MediaPlayerEntityFeature.REPEAT_SET
+                MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE
             )
+        if controls.get(CONTROL_KEY_NEXT):
+            features |= MediaPlayerEntityFeature.NEXT_TRACK
+        if controls.get(CONTROL_KEY_PREVIOUS):
+            features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+        # STOP is the one exception to trusting `controls`: it is accepted on a
+        # Cast source that does not advertise it (verified on hardware), so
+        # gating strictly would hide a button that works. Offer it whenever a
+        # player is running at all.
+        if controls:
+            features |= MediaPlayerEntityFeature.STOP
         return features
 
     @property
@@ -270,16 +234,6 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
     def media_position_updated_at(self) -> datetime | None:
         return self.coordinator.last_updated
 
-    @property
-    def shuffle(self) -> bool | None:
-        entry = PLAY_MODE_LOOKUP.get(self.coordinator.data.get("play_mode"))
-        return entry[0] if entry else None
-
-    @property
-    def repeat(self) -> RepeatMode | None:
-        entry = PLAY_MODE_LOOKUP.get(self.coordinator.data.get("play_mode"))
-        return RepeatMode(entry[1]) if entry else None
-
     # ------------------------------------------------------------ commands
 
     async def _async_control(self, **payload: Any) -> None:
@@ -287,17 +241,7 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
 
         activate() passes dicts through encode() untouched, which is the shape
         this node wants.
-
-        The transport buttons are always shown, so this is where "there is
-        nothing to control" gets reported. A clear message beats the device's
-        own HTTP 500, which for a missing player reads "Directory is empty.
-        No playable items found."
         """
-        if not self._controls:
-            raise HomeAssistantError(
-                "Nothing is playing on this device. Transport applies to a "
-                "streaming source, not to HDMI, optical or line in."
-            )
         try:
             await self.coordinator.client.activate(PLAYER_CONTROL_PATH, payload)
         except NsdkError as exc:
@@ -332,39 +276,6 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         await self._async_control(control=CONTROL_PREVIOUS)
-
-    async def async_media_seek(self, position: float) -> None:
-        await self._async_control(control=CONTROL_SEEK, time=int(position * 1000))
-        self.coordinator.apply_optimistic(play_time=int(position * 1000))
-
-    async def async_seek_relative(self, offset: float) -> None:
-        """Seek by a signed offset in seconds. Custom service."""
-        await self._async_control(
-            control=CONTROL_SEEK, timeRelative=int(offset * 1000)
-        )
-
-    async def async_set_shuffle(self, shuffle: bool) -> None:
-        await self._async_set_play_mode(shuffle=shuffle)
-
-    async def async_set_repeat(self, repeat: RepeatMode) -> None:
-        await self._async_set_play_mode(repeat=str(repeat))
-
-    async def _async_set_play_mode(
-        self, shuffle: bool | None = None, repeat: str | None = None
-    ) -> None:
-        """Recombine shuffle and repeat into the device's single playMode."""
-        current = PLAY_MODE_LOOKUP.get(
-            self.coordinator.data.get("play_mode"), (False, "off")
-        )
-        key = (
-            current[0] if shuffle is None else shuffle,
-            current[1] if repeat is None else repeat,
-        )
-        mode = PLAY_MODES.get(key)
-        if mode is None:
-            raise HomeAssistantError(f"Unsupported shuffle/repeat combination {key}")
-        await self._async_control(control=CONTROL_PLAY_MODE, playMode=mode)
-        self.coordinator.apply_optimistic(play_mode=mode)
 
     async def async_select_source(self, source: str) -> None:
         await self._async_apply_source(source)

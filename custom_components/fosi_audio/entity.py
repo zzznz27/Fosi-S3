@@ -15,7 +15,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import FosiConfigEntry
 from .api import NsdkError
-from .const import CONF_SOURCES, DEFAULT_MODEL, DEFAULT_SOURCES, DOMAIN, MANUFACTURER
+from .const import (
+    CONF_SOURCES,
+    DEFAULT_MODEL,
+    DEFAULT_SOURCES,
+    DOMAIN,
+    MANUFACTURER,
+    SERVICE_NAMES,
+)
 from .coordinator import FosiCoordinator
 
 
@@ -37,26 +44,43 @@ def match_source(sources: dict, state: Any) -> str | None:
     return None
 
 
-def streaming_service(player: Any) -> str | None:
-    """Name of the app streaming to the device, if any.
-
-    Prefers externalAppName ("YouTube Music") over serviceName ("Casting
-    YouTube Music"), which is prose the device builds for its own display.
-    Returns None rather than a placeholder when nothing is streaming, so
-    automations do not have to special-case a magic string.
-    """
+def player_metadata(player: Any) -> dict[str, Any]:
+    """The metaData block, or {} if anything on the way down is missing."""
     node: Any = player
     for key in ("trackRoles", "mediaData", "metaData"):
         if not isinstance(node, dict):
-            return None
+            return {}
         node = node.get(key)
-    if not isinstance(node, dict):
-        return None
-    for key in ("externalAppName", "serviceName"):
-        value = node.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    return node if isinstance(node, dict) else {}
+
+
+def _text(meta: dict[str, Any], key: str) -> str | None:
+    value = meta.get(key)
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def streaming_service(player: Any) -> str | None:
+    """Which protocol is streaming - "Google Cast", "AirPlay", "Roon".
+
+    Always the protocol, derived from serviceID. Reporting whichever field
+    happened to be populated gave "AirPlay" for AirPlay but "YouTube Music"
+    for Cast - a protocol in one case and an app in the other, which is not a
+    consistent thing for a state to be. The app name is an attribute instead.
+
+    An unrecognised serviceID is title-cased rather than dropped, so a
+    protocol nobody here has seen still reports something sensible.
+    """
+    meta = player_metadata(player)
+    service_id = _text(meta, "serviceID")
+    if service_id:
+        return SERVICE_NAMES.get(service_id.lower(), service_id.title())
+    # No serviceID but something is playing - better than reporting nothing.
+    return _text(meta, "serviceName")
+
+
+def streaming_app(player: Any) -> str | None:
+    """The app behind the protocol - "YouTube Music", "Spotify"."""
+    return _text(player_metadata(player), "externalAppName")
 
 
 def selectable(sources: dict) -> list[str]:

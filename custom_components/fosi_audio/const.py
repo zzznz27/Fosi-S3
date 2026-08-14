@@ -63,8 +63,8 @@ DEFAULT_SOURCES: Final[dict[str, dict]] = {
 # Keep this list short: every entry is one HTTP round trip per cycle against a
 # small embedded webserver that is often slow to answer.
 #
-# Order matters: "player" must be read before "play_time" and "play_mode",
-# which the coordinator skips based on what the player just reported.
+# Order matters: "player" must be read before "play_time", which the
+# coordinator skips based on what the player just reported.
 POLL_PATHS: Final[dict[str, str]] = {
     "source": SOURCE_STATE_PATH,
     "mute": "settings:/mediaPlayer/mute",
@@ -72,7 +72,6 @@ POLL_PATHS: Final[dict[str, str]] = {
     "output_mode": "settings:/custom/audioOutputMode",
     "player": "player:player/data/value",
     "play_time": "player:player/data/playTime",
-    "play_mode": "player:player/data/playMode",
 }
 
 VOLUME_MAP_PATH: Final = "settings:/mediaPlayer/volumeMap"
@@ -115,10 +114,30 @@ DEFAULT_VOLUME_STEPS: Final = 100
 #   path/role/value. Verified optional; we do not send it.
 # --------------------------------------------------------------------------
 
+# serviceID -> display name for the streaming-service sensor.
+#
+# The sensor reports the PROTOCOL, always. Reporting whichever field happened
+# to be populated gave "AirPlay" for AirPlay but "YouTube Music" for Cast -
+# a protocol in one case and an app in the other, which is not a consistent
+# thing to put in a state. The app name is an attribute instead.
+SERVICE_NAMES: Final[dict[str, str]] = {
+    "googlecast": "Google Cast",
+    "airplay": "AirPlay",
+    "spotify": "Spotify Connect",
+    "spotifyconnect": "Spotify Connect",
+    "tidal": "Tidal Connect",
+    "tidalconnect": "Tidal Connect",
+    "qobuz": "Qobuz Connect",
+    "qobuzconnect": "Qobuz Connect",
+    "roon": "Roon",
+    "bluetooth": "Bluetooth",
+    "upnp": "UPnP",
+    "dlna": "DLNA",
+}
+
 PLAYER_CONTROL_PATH: Final = "player:player/control"
 PLAYER_DATA_PATH: Final = "player:player/data/value"
 PLAY_TIME_PATH: Final = "player:player/data/playTime"
-PLAY_MODE_PATH: Final = "player:player/data/playMode"
 
 # Values seen in player:player/data/value["state"].
 PLAYER_STATE_PLAYING: Final = "playing"
@@ -130,8 +149,6 @@ CONTROL_PLAY: Final = "play"
 CONTROL_STOP: Final = "stop"
 CONTROL_NEXT: Final = "next"
 CONTROL_PREVIOUS: Final = "previous"
-CONTROL_SEEK: Final = "seekTime"
-CONTROL_PLAY_MODE: Final = "changePlayMode"
 # Confirmed verbs, deliberately not exposed as entities: no source tested so
 # far advertises them, so the buttons were unavailable in every real state.
 CONTROL_LIKE: Final = "like"
@@ -145,23 +162,6 @@ CONTROL_KEY_PLAY: Final = "play"
 CONTROL_KEY_NEXT: Final = "next_"
 CONTROL_KEY_PREVIOUS: Final = "previous"
 CONTROL_KEY_STOP: Final = "stop"
-CONTROL_KEY_SEEK: Final = "seek"
-CONTROL_KEY_PLAY_MODE: Final = "playMode"
-
-# playMode is a single string encoding both shuffle and repeat - a 2x3 matrix.
-# Full enum taken from NsdkPlayerPlayMode in the web client bundle.
-# Keyed (shuffle, repeat) where repeat is HA's "off" | "one" | "all".
-PLAY_MODES: Final[dict[tuple[bool, str], str]] = {
-    (False, "off"): "normal",
-    (True, "off"): "shuffle",
-    (False, "one"): "repeatOne",
-    (True, "one"): "shuffleRepeatOne",
-    (False, "all"): "repeatAll",
-    (True, "all"): "shuffleRepeatAll",
-}
-PLAY_MODE_LOOKUP: Final[dict[str, tuple[bool, str]]] = {
-    mode: key for key, mode in PLAY_MODES.items()
-}
 
 # Analogue vs digital output - an either/or toggle on this hardware.
 # settings:/custom/audioOutputMode: false = RCA/XLR Out, true = Optical Out.

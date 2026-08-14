@@ -51,18 +51,6 @@
       "invalid_sources": "Not valid JSON, or an entry is missing a 'path' or 'state'."
     }
   },
-  "services": {
-    "seek_relative": {
-      "name": "Seek relative",
-      "description": "Jump forward or backward from the current position.",
-      "fields": {
-        "offset": {
-          "name": "Offset",
-          "description": "Seconds to jump. Negative values seek backwards."
-        }
-      }
-    }
-  },
   "entity": {
     "select": {
       "input": {
