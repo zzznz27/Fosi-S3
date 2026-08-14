@@ -20,7 +20,6 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
 | `sensor.<name>_streaming_service` | Which app is streaming — YouTube Music, Spotify, AirPlay |
-| `button.<name>_like` / `_dislike` | Rate the current track, where the source supports it |
 
 Transport covers play/pause, next, previous, stop and — where the source
 supports it — seek and shuffle/repeat. It works for whatever is streaming,

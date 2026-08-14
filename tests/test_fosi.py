@@ -29,7 +29,6 @@ from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
-from fosi_audio.button import BUTTONS, FosiControlButton  # noqa: E402
 from fosi_audio.sensor import FosiServiceSensor  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
@@ -771,43 +770,6 @@ def test_streaming_service() -> None:
     R.check("idle attrs are None", idle.extra_state_attributes["service_id"], None)
 
 
-def test_like_dislike_buttons() -> None:
-    print("\n== like / dislike buttons ==")
-    CTRL = "player:player/control"
-
-    def button(key, controls):
-        desc = next(d for d in BUTTONS if d.key == key)
-        b = FosiControlButton.__new__(FosiControlButton)
-        b.entity_description = desc
-        b.coordinator = FakeCoordinator()
-        b.coordinator.data = {"player": {"controls": controls}}
-        return b
-
-    supported = button("like", {"like": True, "dislike": True})
-    asyncio.run(supported.async_press())
-    R.check(
-        "like sends the verb",
-        supported.coordinator.client.sent[-1],
-        (CTRL, {"control": "like"}, "activate"),
-    )
-
-    dis = button("dislike", {"like": True, "dislike": True})
-    asyncio.run(dis.async_press())
-    R.check(
-        "dislike sends the verb",
-        dis.coordinator.client.sent[-1],
-        (CTRL, {"control": "dislike"}, "activate"),
-    )
-
-    print("\n-- unavailable where the source does not offer them --")
-    # A Cast stream advertises neither, so the buttons grey out rather than
-    # vanishing - unlike the transport row, an unavailable button keeps its
-    # place, so gating honestly costs no layout stability.
-    cast = button("like", LIVE_PAYLOAD["controls"])
-    R.check("greyed out on Cast", cast.available, False)
-    R.check("available when advertised", supported.available, True)
-    R.check("no player at all", button("like", {}).available, False)
-
 
 def test_zeroconf_matcher() -> None:
     """The manifest matcher must not claim every Cast device on the network.
@@ -894,7 +856,6 @@ def main() -> int:
         test_position_timestamp,
         test_network_service_attribute,
         test_streaming_service,
-        test_like_dislike_buttons,
         test_zeroconf_matcher,
         test_diagnostics_redaction,
         test_model_name,

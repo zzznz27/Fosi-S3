@@ -132,6 +132,8 @@ CONTROL_NEXT: Final = "next"
 CONTROL_PREVIOUS: Final = "previous"
 CONTROL_SEEK: Final = "seekTime"
 CONTROL_PLAY_MODE: Final = "changePlayMode"
+# Confirmed verbs, deliberately not exposed as entities: no source tested so
+# far advertises them, so the buttons were unavailable in every real state.
 CONTROL_LIKE: Final = "like"
 CONTROL_DISLIKE: Final = "dislike"
 

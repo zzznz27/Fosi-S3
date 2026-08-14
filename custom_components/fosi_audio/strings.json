@@ -76,14 +76,6 @@
       "streaming_service": {
         "name": "Streaming service"
       }
-    },
-    "button": {
-      "like": {
-        "name": "Like"
-      },
-      "dislike": {
-        "name": "Dislike"
-      }
     }
   }
 }
