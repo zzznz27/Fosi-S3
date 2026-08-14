@@ -21,6 +21,7 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
+| `button.<name>_stop_streaming` | Ends the current streaming session |
 | `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
 | `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
 

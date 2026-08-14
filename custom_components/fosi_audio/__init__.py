@@ -19,7 +19,12 @@ from .events import FosiEventListener
 
 _LOGGER = logging.getLogger(__name__)
 
+# unique_id suffixes of entities this integration used to create. Registry
+# entries outlive the code that made them, so they need naming to be swept.
+REMOVED_ENTITY_SUFFIXES = ("_like", "_dislike")
+
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.MEDIA_PLAYER,
     Platform.SELECT,
     Platform.SENSOR,
@@ -92,7 +97,12 @@ def _async_remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
     registry = er.async_get(hass)
     live = {platform.value for platform in PLATFORMS}
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if entity.domain not in live:
+        dead_platform = entity.domain not in live
+        # The button platform came back for the stop button, so a domain
+        # check alone would no longer catch the like/dislike entities that
+        # shipped in a beta. Name them.
+        dead_entity = entity.unique_id.endswith(REMOVED_ENTITY_SUFFIXES)
+        if dead_platform or dead_entity:
             _LOGGER.debug("Removing stale entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 
