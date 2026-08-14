@@ -174,12 +174,34 @@ class FosiSourceEntity(FosiEntity):
         return options
 
     @property
+    def _network_service(self) -> str | None:
+        """What is streaming, when the source is a network protocol.
+
+        The input option deliberately stays the stable string "Network" so
+        automations comparing against it keep working; the live service is
+        surfaced here instead, and as app_name on the media player.
+        """
+        player = self.coordinator.data.get("player")
+        if not isinstance(player, dict):
+            return None
+        node: Any = player
+        for key in ("trackRoles", "mediaData", "metaData"):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(key)
+        if not isinstance(node, dict):
+            return None
+        name = node.get("externalAppName") or node.get("serviceName")
+        return name.strip() or None if isinstance(name, str) else None
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "raw_source_index": self.coordinator.data.get("source"),
             "active_source": self._active_source,
             # Which of the options can actually be commanded right now.
             "selectable_sources": self._commandable_sources,
+            "network_service": self._network_service,
         }
 
     async def _async_apply_source(self, name: str) -> None:

@@ -27,6 +27,14 @@ from fosi_audio import api, const  # noqa: E402
 from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
+from fosi_audio.events import FosiEventListener  # noqa: E402
+from homeassistant.components.media_player import (  # noqa: E402
+    MediaPlayerEntityFeature,
+    MediaPlayerState,
+)
+from fosi_audio.media_player import (  # noqa: E402
+    FosiMediaPlayer,
+)
 from fosi_audio.entity import (  # noqa: E402
     FosiSourceEntity,
     async_apply_source,
@@ -92,16 +100,22 @@ class FakeClient(api.NsdkClient):
 class FakeCoordinator:
     """Enough coordinator for the entity helpers.
 
-    Borrows the real apply_optimistic so the shipped implementation is what
-    gets exercised, not a reimplementation of it.
+    Borrows the real methods so the shipped implementations are what get
+    exercised, not reimplementations of them.
     """
 
+    apply_update = FosiCoordinator.apply_update
     apply_optimistic = FosiCoordinator.apply_optimistic
+    volume_to_level = FosiCoordinator.volume_to_level
+    level_to_volume = FosiCoordinator.level_to_volume
+    volume_steps = FosiCoordinator.volume_steps
 
     def __init__(self, source=0) -> None:
         self.data = {"source": source, "mute": False}
         self.refreshes = 0
         self.client = FakeClient()
+        self.volume_map = []
+        self.last_updated = None
 
     def async_set_updated_data(self, data) -> None:
         self.data = data
@@ -135,6 +149,55 @@ class _FailingClient:
 
     async def read(self, path):
         raise self._exc
+
+
+class FakePlayer(FosiMediaPlayer):
+    """FosiMediaPlayer without the CoordinatorEntity constructor."""
+
+    def __init__(self, **data) -> None:
+        self._sources = SOURCES
+        self.coordinator = FakeCoordinator()
+        self.coordinator.data = {"source": 0, "mute": False, **data}
+
+    @property
+    def sent(self):
+        return self.coordinator.client.sent
+
+
+# Captured verbatim off the device while casting YouTube Music. Extraction is
+# tested against real output rather than an invented shape.
+LIVE_PAYLOAD = {
+    "trackRoles": {
+        "icon": "https://yt3.googleusercontent.com/cyn5uOK6=w544-h544-l90-rj",
+        "mediaData": {
+            "metaData": {
+                "externalAppName": "YouTube Music",
+                "serviceID": "googlecast",
+                "serviceName": "Casting YouTube Music",
+                "albumArtist": "",
+                "album": "Lean Into Life",
+                "originalTrackNumber": -1,
+                "artist": "Petey USA",
+                "composer": "",
+            }
+        },
+        "title": "Lean Into Life",
+        "audioType": "musicTrack",
+    },
+    "controls": {
+        "pause": True,
+        "next_": True,
+        "playMode": {},
+        "previous": True,
+    },
+    "status": {"duration": 327281},
+    "state": "playing",
+}
+
+STOPPED_PAYLOAD = {
+    "trackRoles": {"mediaData": {"metaData": {"serviceID": "", "serviceName": ""}}},
+    "state": "stopped",
+}
 
 
 # ------------------------------------------------------------------- tests
@@ -403,6 +466,261 @@ def test_volume_curve_retry() -> None:
     R.check("absent node settles (stops asking)", absent._volume_map_settled, True)
 
 
+def test_now_playing_extraction() -> None:
+    print("\n== now-playing extraction, against the real payload ==")
+    p = FakePlayer(player=LIVE_PAYLOAD, play_time=6800)
+    R.check("state", p.state, MediaPlayerState.PLAYING)
+    R.check("title", p.media_title, "Lean Into Life")
+    R.check("artist", p.media_artist, "Petey USA")
+    R.check("album", p.media_album_name, "Lean Into Life")
+    R.check("app name", p.app_name, "YouTube Music")
+    R.check("art url", p.media_image_url, LIVE_PAYLOAD["trackRoles"]["icon"])
+    R.check("duration from .status", p.media_duration, 327.281)
+    R.check("position from playTime", p.media_position, 6.8)
+    R.check("empty albumArtist -> None", p.media_album_artist, None)
+    R.check("content type", p.media_content_type, "music")
+
+    print("\n-- stopped: nothing raises, everything degrades --")
+    s = FakePlayer(player=STOPPED_PAYLOAD)
+    R.check("state", s.state, MediaPlayerState.IDLE)
+    R.check("title", s.media_title, None)
+    R.check("artist", s.media_artist, None)
+    R.check("duration", s.media_duration, None)
+    R.check("position", s.media_position, None)
+    R.check("app name", s.app_name, None)
+
+    print("\n-- no player at all (HDMI / optical / line-in) --")
+    n = FakePlayer()
+    R.check("state falls back to ON", n.state, MediaPlayerState.ON)
+    R.check("title", n.media_title, None)
+
+    print("\n-- skin: icons are device-internal, not fetchable --")
+    skin = FakePlayer(player={"trackRoles": {"icon": "skin:iconGooglecast"}})
+    R.check("skin icon rejected", skin.media_image_url, None)
+
+
+def test_controls_drive_features() -> None:
+    print("\n== controls object gates supported_features ==")
+    F = MediaPlayerEntityFeature
+    live = FakePlayer(player=LIVE_PAYLOAD).supported_features
+    R.check("pause grants PLAY", bool(live & F.PLAY), True)
+    R.check("pause grants PAUSE", bool(live & F.PAUSE), True)
+    R.check("next_ grants NEXT_TRACK", bool(live & F.NEXT_TRACK), True)
+    R.check("previous grants PREVIOUS_TRACK", bool(live & F.PREVIOUS_TRACK), True)
+    R.check("no seek advertised", bool(live & F.SEEK), False)
+    # controls is not exhaustive: stop is accepted on a Cast source that does
+    # not list it, verified on hardware, so it is offered whenever a player is
+    # running rather than gated strictly.
+    R.check("stop offered despite not being listed", bool(live & F.STOP), True)
+
+    print("\n-- empty object means unsupported, not supported --")
+    # Cast reports "playMode": {}. Gating on key presence advertised
+    # shuffle/repeat buttons that the device rejected with
+    # "Play mode is not supported". Caught on hardware.
+    R.check("empty playMode grants no SHUFFLE_SET", bool(live & F.SHUFFLE_SET), False)
+    R.check("empty playMode grants no REPEAT_SET", bool(live & F.REPEAT_SET), False)
+    real = FakePlayer(player={"controls": {"playMode": {"shuffle": True}}})
+    R.check(
+        "populated playMode grants SHUFFLE_SET",
+        bool(real.supported_features & F.SHUFFLE_SET),
+        True,
+    )
+    false_valued = FakePlayer(player={"controls": {"next_": False}})
+    R.check(
+        "next_: false grants nothing",
+        bool(false_valued.supported_features & F.NEXT_TRACK),
+        False,
+    )
+
+    print("\n-- the trailing-underscore trap --")
+    wrong = FakePlayer(player={"controls": {"next": True}}).supported_features
+    R.check(
+        "'next' without underscore grants nothing", bool(wrong & F.NEXT_TRACK), False
+    )
+    right = FakePlayer(player={"controls": {"next_": True}}).supported_features
+    R.check("'next_' grants NEXT_TRACK", bool(right & F.NEXT_TRACK), True)
+
+    print("\n-- no controls -> no transport --")
+    none = FakePlayer(player=STOPPED_PAYLOAD).supported_features
+    for name in ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK", "SEEK"):
+        R.check(f"no {name}", bool(none & getattr(F, name)), False)
+    R.check("not even stop without a player", bool(none & F.STOP), False)
+    R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
+
+
+def test_transport_commands() -> None:
+    print("\n== transport payloads and toggle guards ==")
+    CTRL = "player:player/control"
+
+    playing = FakePlayer(player=LIVE_PAYLOAD)
+    asyncio.run(playing.async_media_play())
+    R.check("play while playing sends nothing", playing.sent, [])
+
+    asyncio.run(playing.async_media_pause())
+    R.check("pause while playing toggles", playing.sent[-1],
+            (CTRL, {"control": "pause"}, "activate"))
+    R.check("state optimistically paused", playing.state, MediaPlayerState.PAUSED)
+
+    paused = FakePlayer(player={**LIVE_PAYLOAD, "state": "paused"})
+    asyncio.run(paused.async_media_pause())
+    R.check("pause while paused sends nothing", paused.sent, [])
+    asyncio.run(paused.async_media_play())
+    R.check("play while paused toggles", paused.sent[-1],
+            (CTRL, {"control": "pause"}, "activate"))
+    R.check("state optimistically playing", paused.state, MediaPlayerState.PLAYING)
+
+    print("\n-- explicit play verb preferred when the source offers it --")
+    q = FakePlayer(
+        player={"controls": {"play": True, "pause": True}, "state": "paused"}
+    )
+    asyncio.run(q.async_media_play())
+    R.check("uses 'play' not the toggle", q.sent[-1],
+            (CTRL, {"control": "play"}, "activate"))
+
+    print("\n-- the rest --")
+    p = FakePlayer(player=LIVE_PAYLOAD)
+    asyncio.run(p.async_media_next_track())
+    R.check("next", p.sent[-1], (CTRL, {"control": "next"}, "activate"))
+    asyncio.run(p.async_media_previous_track())
+    R.check("previous", p.sent[-1], (CTRL, {"control": "previous"}, "activate"))
+    asyncio.run(p.async_media_stop())
+    R.check("stop", p.sent[-1], (CTRL, {"control": "stop"}, "activate"))
+    asyncio.run(p.async_media_seek(42.5))
+    R.check("absolute seek in ms", p.sent[-1],
+            (CTRL, {"control": "seekTime", "time": 42500}, "activate"))
+    asyncio.run(p.async_seek_relative(-30))
+    R.check("relative seek in ms", p.sent[-1],
+            (CTRL, {"control": "seekTime", "timeRelative": -30000}, "activate"))
+
+
+def test_play_modes() -> None:
+    print("\n== shuffle and repeat round-trip all six modes ==")
+    for (shuffle, repeat), mode in const.PLAY_MODES.items():
+        p = FakePlayer(play_mode=mode)
+        R.check(f"{mode!r} -> shuffle={shuffle}", p.shuffle, shuffle)
+        R.check(f"{mode!r} -> repeat={repeat}", str(p.repeat), repeat)
+
+    print("\n-- writing recombines both halves --")
+    p = FakePlayer(player=LIVE_PAYLOAD, play_mode="repeatAll")
+    asyncio.run(p.async_set_shuffle(True))
+    R.check("shuffle on keeps repeatAll", p.sent[-1][1],
+            {"control": "changePlayMode", "playMode": "shuffleRepeatAll"})
+    p2 = FakePlayer(player=LIVE_PAYLOAD, play_mode="shuffle")
+    asyncio.run(p2.async_set_repeat(stubs.RepeatMode("one")))
+    R.check("repeat one keeps shuffle", p2.sent[-1][1],
+            {"control": "changePlayMode", "playMode": "shuffleRepeatOne"})
+    R.check(
+        "unknown mode -> no shuffle reported", FakePlayer(play_mode="?").shuffle, None
+    )
+
+
+def test_conditional_polling() -> None:
+    print("\n== player extras are skipped when meaningless ==")
+    skip = FosiCoordinator._skip
+    playing = {"player": LIVE_PAYLOAD}
+    R.check("play_time polled while playing", skip("play_time", playing), False)
+    # Cast reports "playMode": {} - present but unsupported, so do not spend a
+    # round trip on it every cycle.
+    R.check("play_mode skipped when empty", skip("play_mode", playing), True)
+    supported = {"player": {"controls": {"playMode": {"shuffle": True}}}}
+    R.check("play_mode polled when populated", skip("play_mode", supported), False)
+
+    stopped = {"player": STOPPED_PAYLOAD}
+    R.check("play_time skipped when stopped", skip("play_time", stopped), True)
+    R.check("play_mode skipped without controls", skip("play_mode", stopped), True)
+
+    R.check("skipped when no player at all", skip("play_time", {"player": None}), True)
+    R.check("never skips the core keys", skip("volume", {}), False)
+
+
+def test_position_timestamp() -> None:
+    """media_position_updated_at has to move whenever the position does.
+
+    The device pushes playTime about once a second and every push resets the
+    coordinator's poll timer, so the scheduled poll never runs while music is
+    playing. Stamping the timestamp only in the poll left it frozen, and HA
+    added the elapsed wall-clock to a correct position - the progress bar ran
+    minutes past the end of the track.
+    """
+    print("\n== position timestamp tracks the position ==")
+    co = FakeCoordinator()
+    co.data = {}
+    R.check("starts unstamped", co.last_updated, None)
+
+    co.apply_update(volume=40)
+    R.check("unrelated update does not stamp", co.last_updated, None)
+
+    co.apply_update(play_time=1000)
+    stamped = co.last_updated
+    R.check("play_time stamps it", stamped is not None, True)
+
+    co.apply_update(mute=True)
+    R.check("still not restamped by others", co.last_updated, stamped)
+
+    print("\n-- and the player reports it --")
+    p = FakePlayer(player=LIVE_PAYLOAD, play_time=90000)
+    p.coordinator.last_updated = stamped
+    R.check("position in seconds", p.media_position, 90.0)
+    R.check("timestamp exposed", p.media_position_updated_at, stamped)
+
+
+def test_network_service_attribute() -> None:
+    print("\n== network service exposed without destabilising the input ==")
+    e = FakeSourceEntity(0)
+    e.coordinator.data["player"] = LIVE_PAYLOAD
+    R.check("input option stays stable", e._active_source, "Network")
+    R.check("service surfaced separately", e._network_service, "YouTube Music")
+    R.check("attribute present", e.extra_state_attributes["network_service"],
+            "YouTube Music")
+
+    idle = FakeSourceEntity(3)
+    R.check("no player -> no service", idle._network_service, None)
+
+
+def test_event_parsing() -> None:
+    print("\n== event stream parsing ==")
+    paths = {path: key for key, path in const.POLL_PATHS.items()}
+
+    # Shape captured off the device: the player node pushes a playLogicData
+    # tagged union, which decode() unwraps like any other.
+    events = [
+        {
+            "path": "player:player/data/value",
+            "itemValue": {"type": "playLogicData", "playLogicData": LIVE_PAYLOAD},
+        },
+        {"path": "player:volume", "itemValue": {"type": "i32_", "i32_": 42}},
+        {
+            "path": "settings:/custom/lastAudioSource",
+            "itemValue": {"type": "i32_", "i32_": 3},
+        },
+    ]
+    updates = FosiEventListener.parse(events, paths)
+    R.check("player payload unwrapped", updates["player"], LIVE_PAYLOAD)
+    R.check("volume decoded", updates["volume"], 42)
+    R.check("source decoded", updates["source"], 3)
+    R.check("maps to HDMI", match_source(SOURCES, updates["source"]), "HDMI In")
+
+    print("\n-- malformed input is ignored, never raises --")
+    R.check("unknown path skipped", FosiEventListener.parse(
+        [{"path": "who:/knows", "itemValue": {"type": "i32_", "i32_": 1}}], paths), {})
+    R.check("missing itemValue skipped", FosiEventListener.parse(
+        [{"path": "player:volume"}], paths), {})
+    R.check("non-dict event skipped", FosiEventListener.parse(["nope"], paths), {})
+    R.check("non-list reply", FosiEventListener.parse(None, paths), {})
+    R.check("empty reply", FosiEventListener.parse([], paths), {})
+
+    print("\n-- every polled node is subscribed --")
+    listener = FosiEventListener.__new__(FosiEventListener)
+    subs = listener._subscriptions
+    R.check("one subscription per polled path", len(subs), len(const.POLL_PATHS))
+    R.check(
+        "paths match POLL_PATHS",
+        sorted(s["path"] for s in subs),
+        sorted(const.POLL_PATHS.values()),
+    )
+    R.check("all itemWithValue", {s["type"] for s in subs}, {"itemWithValue"})
+
+
 def main() -> int:
     for test in (
         test_packaging_metadata,
@@ -412,6 +730,14 @@ def main() -> int:
         test_url_building,
         test_options_flow_validation,
         test_source_mapping,
+        test_now_playing_extraction,
+        test_controls_drive_features,
+        test_transport_commands,
+        test_play_modes,
+        test_conditional_polling,
+        test_event_parsing,
+        test_position_timestamp,
+        test_network_service_attribute,
         test_model_name,
         test_volume_scale,
         test_optimistic_updates,
