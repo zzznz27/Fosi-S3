@@ -500,23 +500,41 @@ def test_now_playing_extraction() -> None:
 
 
 def test_controls_drive_features() -> None:
-    print("\n== controls object gates supported_features ==")
-    F = MediaPlayerEntityFeature
-    live = FakePlayer(player=LIVE_PAYLOAD).supported_features
-    R.check("pause grants PLAY", bool(live & F.PLAY), True)
-    R.check("pause grants PAUSE", bool(live & F.PAUSE), True)
-    R.check("next_ grants NEXT_TRACK", bool(live & F.NEXT_TRACK), True)
-    R.check("previous grants PREVIOUS_TRACK", bool(live & F.PREVIOUS_TRACK), True)
-    R.check("no seek advertised", bool(live & F.SEEK), False)
-    # controls is not exhaustive: stop is accepted on a Cast source that does
-    # not list it, verified on hardware, so it is offered whenever a player is
-    # running rather than gated strictly.
-    R.check("stop offered despite not being listed", bool(live & F.STOP), True)
+    """The button row is fixed; only the non-row features follow `controls`.
 
-    print("\n-- empty object means unsupported, not supported --")
+    The device varies `controls` between states - next_ is present while
+    playing and gone while paused - and letting that drive the feature flags
+    made the buttons move around under the cursor. HA has no disabled state
+    for transport buttons, so a static row means advertising it consistently.
+    """
+    print("\n== transport button row is static ==")
+    F = MediaPlayerEntityFeature
+    ROW = ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK")
+
+    live = FakePlayer(player=LIVE_PAYLOAD).supported_features
+    for name in ROW:
+        R.check(f"{name} offered while playing", bool(live & getattr(F, name)), True)
+
+    print("\n-- and does not change when the device withdraws a control --")
+    # Observed on hardware: next_ vanishes from controls while paused.
+    withdrawn = dict(LIVE_PAYLOAD)
+    withdrawn["controls"] = {"pause": True}
+    withdrawn["state"] = "paused"
+    paused = FakePlayer(player=withdrawn).supported_features
+    for name in ROW:
+        R.check(
+            f"{name} still offered while paused",
+            bool(paused & getattr(F, name)),
+            True,
+        )
+    R.check("row is identical between states", live & F.PLAY | live & F.NEXT_TRACK,
+            paused & F.PLAY | paused & F.NEXT_TRACK)
+
+    print("\n-- non-row features stay honest --")
+    R.check("no seek advertised", bool(live & F.SEEK), False)
     # Cast reports "playMode": {}. Gating on key presence advertised
-    # shuffle/repeat buttons that the device rejected with
-    # "Play mode is not supported". Caught on hardware.
+    # shuffle/repeat buttons the device rejected with "Play mode is not
+    # supported". Caught on hardware.
     R.check("empty playMode grants no SHUFFLE_SET", bool(live & F.SHUFFLE_SET), False)
     R.check("empty playMode grants no REPEAT_SET", bool(live & F.REPEAT_SET), False)
     real = FakePlayer(player={"controls": {"playMode": {"shuffle": True}}})
@@ -525,26 +543,14 @@ def test_controls_drive_features() -> None:
         bool(real.supported_features & F.SHUFFLE_SET),
         True,
     )
-    false_valued = FakePlayer(player={"controls": {"next_": False}})
-    R.check(
-        "next_: false grants nothing",
-        bool(false_valued.supported_features & F.NEXT_TRACK),
-        False,
-    )
+    seekable = FakePlayer(player={"controls": {"seek": True}})
+    R.check("seek grants SEEK", bool(seekable.supported_features & F.SEEK), True)
 
-    print("\n-- the trailing-underscore trap --")
-    wrong = FakePlayer(player={"controls": {"next": True}}).supported_features
-    R.check(
-        "'next' without underscore grants nothing", bool(wrong & F.NEXT_TRACK), False
-    )
-    right = FakePlayer(player={"controls": {"next_": True}}).supported_features
-    R.check("'next_' grants NEXT_TRACK", bool(right & F.NEXT_TRACK), True)
-
-    print("\n-- no controls -> no transport --")
+    print("\n-- no player at all -> no transport whatsoever --")
     none = FakePlayer(player=STOPPED_PAYLOAD).supported_features
-    for name in ("PLAY", "PAUSE", "STOP", "NEXT_TRACK", "PREVIOUS_TRACK", "SEEK"):
+    for name in (*ROW, "SEEK", "SHUFFLE_SET", "REPEAT_SET"):
         R.check(f"no {name}", bool(none & getattr(F, name)), False)
-    R.check("not even stop without a player", bool(none & F.STOP), False)
+    R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
     R.check("source select still offered", bool(none & F.SELECT_SOURCE), True)
 
 

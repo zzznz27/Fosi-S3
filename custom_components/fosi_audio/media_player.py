@@ -22,11 +22,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import FosiConfigEntry
 from .api import NsdkError
 from .const import (
-    CONTROL_KEY_NEXT,
-    CONTROL_KEY_PAUSE,
     CONTROL_KEY_PLAY,
     CONTROL_KEY_PLAY_MODE,
-    CONTROL_KEY_PREVIOUS,
     CONTROL_KEY_SEEK,
     CONTROL_NEXT,
     CONTROL_PLAY,
@@ -165,26 +162,39 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
                 | MediaPlayerEntityFeature.VOLUME_STEP
             )
 
-        # Test the VALUE, not just the key. A Cast source reports
-        # "playMode": {} - the key is present but the empty object means
-        # unsupported, and sending changePlayMode there is rejected with
-        # "Play mode is not supported". Confirmed on hardware.
         controls = self._controls
-        # One verb serves both directions, so "pause" grants PLAY and PAUSE.
-        if controls.get(CONTROL_KEY_PAUSE) or controls.get(CONTROL_KEY_PLAY):
-            features |= (
-                MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE
-            )
-        if controls.get(CONTROL_KEY_NEXT):
-            features |= MediaPlayerEntityFeature.NEXT_TRACK
-        if controls.get(CONTROL_KEY_PREVIOUS):
-            features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
-        # STOP is the one exception to trusting `controls`: it is accepted on a
-        # Cast source that does not advertise it (verified on hardware), so
-        # gating strictly would hide a button that works. Offer it whenever a
-        # player is running at all.
         if controls:
-            features |= MediaPlayerEntityFeature.STOP
+            # A FIXED button row whenever a player is running.
+            #
+            # The device varies `controls` between states - next_ is present
+            # while playing and gone while paused on a Cast source - and
+            # letting that drive supported_features makes the buttons move
+            # around under the cursor as playback changes.
+            #
+            # Home Assistant has no disabled state for transport buttons;
+            # supported_features is binary, so the only way to keep the row
+            # static is to advertise it consistently. A command the source
+            # rejects surfaces the device's own message instead, which is a
+            # better trade than a shifting layout. `stop` already proved
+            # `controls` under-reports: it is accepted on a Cast source that
+            # never advertises it.
+            features |= (
+                MediaPlayerEntityFeature.PLAY
+                | MediaPlayerEntityFeature.PAUSE
+                | MediaPlayerEntityFeature.STOP
+                | MediaPlayerEntityFeature.NEXT_TRACK
+                | MediaPlayerEntityFeature.PREVIOUS_TRACK
+            )
+
+        # These stay honest, because they do not sit in the button row: SEEK
+        # makes the progress bar draggable, and the play modes render their
+        # own controls. Advertising those falsely would mislead rather than
+        # merely shift.
+        #
+        # Test the VALUE, not just the key: a Cast source reports
+        # "playMode": {}, where the key exists but the empty object means
+        # unsupported - changePlayMode there is rejected with "Play mode is
+        # not supported". Confirmed on hardware.
         if controls.get(CONTROL_KEY_SEEK):
             features |= MediaPlayerEntityFeature.SEEK
         if controls.get(CONTROL_KEY_PLAY_MODE):
