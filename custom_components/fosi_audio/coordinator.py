@@ -108,40 +108,47 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (TypeError, ValueError):
             _LOGGER.debug("volumeMap is not numeric: %r", volume_map[:4])
 
-    def apply_update(self, **values: Any) -> None:
-        """Merge values into the current data and publish at once.
-
-        Used for two things: values pushed by the device over the event
-        stream, which are authoritative, and optimistic command results,
-        which are assumed. Both want the same merge-and-notify behaviour.
-        """
+    def _merge(self, values: dict[str, Any]) -> dict[str, Any]:
         data = dict(self.data or {})
         data.update(values)
         if "play_time" in values:
-            # media_position_updated_at must move with the position. The
-            # device pushes playTime about once a second, and every push
-            # calls async_set_updated_data, which resets the poll timer - so
-            # while something is playing _async_update_data may never run.
-            # Stamping only there left the timestamp frozen at setup and Home
-            # Assistant extrapolated from it, running the progress bar way
-            # past the end of the track.
+            # media_position_updated_at must move with the position, or Home
+            # Assistant extrapolates from a stale stamp and runs the progress
+            # bar past the end of the track.
             self.last_updated = dt_util.utcnow()
-        self.async_set_updated_data(data)
+        return data
+
+    def apply_update(self, **values: Any) -> None:
+        """Publish values pushed by the device.
+
+        Deliberately notifies listeners WITHOUT rescheduling the poll.
+
+        async_set_updated_data resets the update interval, and the device
+        pushes playTime about once a second - so using it here meant the
+        scheduled poll never ran at all while anything was playing. That made
+        the event stream the only path for every value, and a single missed
+        event permanent: the input select sat on "HDMI In" through an entire
+        AirPlay session because it never saw the one event that changed it,
+        and nothing came along afterwards to correct it.
+
+        Keeping the timer running means the poll stays a real safety net,
+        which is the whole reason it is still here.
+        """
+        self.data = self._merge(values)
+        self.async_update_listeners()
 
     def apply_optimistic(self, **values: Any) -> None:
         """Show an expected value immediately, before the device confirms it.
 
-        The host MCU takes a moment to act on a ui: action and update
-        lastAudioSource, so a refresh fired straight after the command reads
-        back the *old* value and the UI does not settle until the next
-        scheduled poll. Assume the command worked, publish that, and let the
-        poll correct us if it did not.
+        The device reflects a write about half a second late, so a refresh
+        fired straight after a command reads back the *old* value. Assume the
+        command worked and publish that.
 
-        Deliberately does not chain a refresh: async_set_updated_data resets
-        the interval timer, so the confirming read is one full cycle away and
-        cannot race the value we just published.
+        Unlike a pushed event this DOES reset the interval, pushing the
+        confirming read a full cycle away so it cannot race the value just
+        published.
         """
-        self.apply_update(**values)
+        self.async_set_updated_data(self._merge(values))
 
     async def _async_update_data(self) -> dict[str, Any]:
         # Retry a curve that failed to load at setup. Costs one extra request
