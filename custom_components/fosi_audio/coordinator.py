@@ -109,6 +109,17 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (TypeError, ValueError):
             _LOGGER.debug("volumeMap is not numeric: %r", volume_map[:4])
 
+    def apply_update(self, **values: Any) -> None:
+        """Merge values into the current data and publish at once.
+
+        Used for two things: values pushed by the device over the event
+        stream, which are authoritative, and optimistic command results,
+        which are assumed. Both want the same merge-and-notify behaviour.
+        """
+        data = dict(self.data or {})
+        data.update(values)
+        self.async_set_updated_data(data)
+
     def apply_optimistic(self, **values: Any) -> None:
         """Show an expected value immediately, before the device confirms it.
 
@@ -122,9 +133,7 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         the interval timer, so the confirming read is one full cycle away and
         cannot race the value we just published.
         """
-        data = dict(self.data or {})
-        data.update(values)
-        self.async_set_updated_data(data)
+        self.apply_update(**values)
 
     async def _async_update_data(self) -> dict[str, Any]:
         # Retry a curve that failed to load at setup. Costs one extra request

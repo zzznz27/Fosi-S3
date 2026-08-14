@@ -27,6 +27,9 @@ Home Assistant can otherwise control.
 
 Now-playing gives title, artist, album, artwork and position.
 
+Updates are pushed by the device rather than polled, so a track change or a
+press on the remote shows up in well under a second.
+
 ### Buttons match what the source can actually do
 
 The device reports which transport actions the current source supports, and
@@ -69,8 +72,10 @@ integration — that keeps your entity IDs and history.
 
 From **Configure** on the integration card. No YAML.
 
-**Poll interval** (default 15s) — how quickly HA notices changes made on the
-remote or front panel. Commands sent from HA apply immediately regardless.
+**Poll interval** (default 60s) — only a safety net. The device pushes changes
+over its event API, so track changes, input switches from the remote and knob
+turns all appear within a fraction of a second. Polling exists so that a
+dropped event stream degrades to slow updates rather than stale ones.
 
 **Source map** — the input list is configuration, so other StreamSDK hardware
 can be supported without touching code:

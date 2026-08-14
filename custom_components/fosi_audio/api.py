@@ -44,6 +44,10 @@ IDENTITY_PATHS: dict[str, tuple[str, ...]] = {
 # letting setup stall for timeout * len(IDENTITY_PATHS).
 VERIFY_TIMEOUT = 20.0
 
+# How much longer than the server's hold time to allow a long poll before
+# giving up on it, so an idle poll is never mistaken for a dead connection.
+POLL_TIMEOUT_MARGIN = 10.0
+
 
 class NsdkError(Exception):
     """Base error."""
@@ -125,9 +129,12 @@ class NsdkClient:
         return NsdkError(f"HTTP {status}: {message}")
 
     async def _request(
-        self, url: str, payload: dict[str, Any] | None = None
+        self,
+        url: str,
+        payload: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
-        timeout = aiohttp.ClientTimeout(total=self._timeout)
+        timeout = aiohttp.ClientTimeout(total=timeout or self._timeout)
         try:
             if payload is None:
                 resp = await self._session.get(url, timeout=timeout)
@@ -171,6 +178,42 @@ class NsdkClient:
     async def set_data(self, path: str, value: Any, role: str = "value") -> Any:
         return await self._request(
             f"{self._base}/setData", {"path": path, "role": role, "value": value}
+        )
+
+    async def modify_queue(
+        self,
+        queue_id: str,
+        subscribe: list[dict[str, str]],
+        unsubscribe: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Create or amend an event queue, returning its id.
+
+        An empty queue_id asks the device to create a new queue. Subscription
+        entries are {"path": ..., "type": "itemWithValue"}; the other types
+        the web client knows about are "item" and "rows".
+        """
+        reply = await self._request(
+            f"{self._base}/event/modifyQueue",
+            {
+                "queueId": queue_id,
+                "subscribe": subscribe,
+                "unsubscribe": unsubscribe or [],
+            },
+        )
+        if not isinstance(reply, str) or not reply:
+            raise NsdkError(f"modifyQueue returned no queue id: {reply!r}")
+        return reply
+
+    async def poll_queue(self, queue_id: str, timeout_ms: int = 30000) -> Any:
+        """Long-poll a queue. Returns a list of events, or None on expiry.
+
+        The device holds the connection open for up to timeout_ms, so the
+        HTTP timeout has to exceed it or every idle poll looks like a
+        failure. Deliberately does not use self._timeout.
+        """
+        return await self._request(
+            self._url("/event/pollQueue", {"queueId": queue_id, "timeout": timeout_ms}),
+            timeout=timeout_ms / 1000 + POLL_TIMEOUT_MARGIN,
         )
 
     async def get_rows(

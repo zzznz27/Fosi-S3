@@ -27,6 +27,7 @@ from fosi_audio import api, const  # noqa: E402
 from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
+from fosi_audio.events import FosiEventListener  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
     MediaPlayerState,
@@ -103,6 +104,7 @@ class FakeCoordinator:
     exercised, not reimplementations of them.
     """
 
+    apply_update = FosiCoordinator.apply_update
     apply_optimistic = FosiCoordinator.apply_optimistic
     volume_to_level = FosiCoordinator.volume_to_level
     level_to_volume = FosiCoordinator.level_to_volume
@@ -644,6 +646,50 @@ def test_network_service_attribute() -> None:
     R.check("no player -> no service", idle._network_service, None)
 
 
+def test_event_parsing() -> None:
+    print("\n== event stream parsing ==")
+    paths = {path: key for key, path in const.POLL_PATHS.items()}
+
+    # Shape captured off the device: the player node pushes a playLogicData
+    # tagged union, which decode() unwraps like any other.
+    events = [
+        {
+            "path": "player:player/data/value",
+            "itemValue": {"type": "playLogicData", "playLogicData": LIVE_PAYLOAD},
+        },
+        {"path": "player:volume", "itemValue": {"type": "i32_", "i32_": 42}},
+        {
+            "path": "settings:/custom/lastAudioSource",
+            "itemValue": {"type": "i32_", "i32_": 3},
+        },
+    ]
+    updates = FosiEventListener.parse(events, paths)
+    R.check("player payload unwrapped", updates["player"], LIVE_PAYLOAD)
+    R.check("volume decoded", updates["volume"], 42)
+    R.check("source decoded", updates["source"], 3)
+    R.check("maps to HDMI", match_source(SOURCES, updates["source"]), "HDMI In")
+
+    print("\n-- malformed input is ignored, never raises --")
+    R.check("unknown path skipped", FosiEventListener.parse(
+        [{"path": "who:/knows", "itemValue": {"type": "i32_", "i32_": 1}}], paths), {})
+    R.check("missing itemValue skipped", FosiEventListener.parse(
+        [{"path": "player:volume"}], paths), {})
+    R.check("non-dict event skipped", FosiEventListener.parse(["nope"], paths), {})
+    R.check("non-list reply", FosiEventListener.parse(None, paths), {})
+    R.check("empty reply", FosiEventListener.parse([], paths), {})
+
+    print("\n-- every polled node is subscribed --")
+    listener = FosiEventListener.__new__(FosiEventListener)
+    subs = listener._subscriptions
+    R.check("one subscription per polled path", len(subs), len(const.POLL_PATHS))
+    R.check(
+        "paths match POLL_PATHS",
+        sorted(s["path"] for s in subs),
+        sorted(const.POLL_PATHS.values()),
+    )
+    R.check("all itemWithValue", {s["type"] for s in subs}, {"itemWithValue"})
+
+
 def main() -> int:
     for test in (
         test_packaging_metadata,
@@ -658,6 +704,7 @@ def main() -> int:
         test_transport_commands,
         test_play_modes,
         test_conditional_polling,
+        test_event_parsing,
         test_network_service_attribute,
         test_model_name,
         test_volume_scale,

@@ -13,6 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import NsdkClient, NsdkError, NsdkUnsupportedError
 from .const import DEFAULT_SCAN_INTERVAL
 from .coordinator import FosiCoordinator
+from .events import FosiEventListener
 
 PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.SELECT]
 
@@ -23,6 +24,7 @@ class FosiRuntimeData:
 
     client: NsdkClient
     coordinator: FosiCoordinator
+    listener: FosiEventListener
 
 
 type FosiConfigEntry = ConfigEntry[FosiRuntimeData]
@@ -49,7 +51,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> bool
 
     await coordinator.async_config_entry_first_refresh()
 
-    entry.runtime_data = FosiRuntimeData(client=client, coordinator=coordinator)
+    # Push updates. Polling stays on underneath as a safety net, so a stream
+    # that dies silently degrades to slow rather than freezing the entities.
+    listener = FosiEventListener(coordinator, client)
+    listener.start()
+
+    entry.runtime_data = FosiRuntimeData(
+        client=client, coordinator=coordinator, listener=listener
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
@@ -57,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> bool
 
 async def async_unload_entry(hass: HomeAssistant, entry: FosiConfigEntry) -> bool:
     """Unload a config entry."""
+    await entry.runtime_data.listener.async_stop()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

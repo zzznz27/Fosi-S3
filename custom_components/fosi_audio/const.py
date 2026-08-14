@@ -11,7 +11,7 @@ DEFAULT_MODEL: Final = "S3"
 # CONF_SCAN_INTERVAL comes from homeassistant.const - no need to redefine it.
 CONF_SOURCES: Final = "sources"
 
-DEFAULT_SCAN_INTERVAL: Final = 15
+DEFAULT_SCAN_INTERVAL: Final = 60
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 600
 
