@@ -19,13 +19,20 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
-| `sensor.<name>_streaming_service` | Which protocol is streaming — Google Cast, AirPlay, Roon |
+| `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
+| `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
 
 Transport covers play/pause, next, previous and stop. It works for whatever is
 streaming, including AirPlay, Spotify Connect, Tidal Connect and Bluetooth,
 none of which Home Assistant can otherwise control.
 
 Now-playing gives title, artist, album, artwork and position.
+
+**Protocol and service are separate.** How audio arrives and what is playing it
+are different facts, and the device reports both. Casting Apple Music gives
+protocol "Google Cast" and service "Apple Music". AirPlay names no app, so the
+service is genuinely unknown there while the protocol still reports. The
+Connect protocols only carry one service, so Spotify Connect implies Spotify.
 
 Updates are pushed by the device rather than polled, so a track change or a
 press on the remote shows up in well under a second.

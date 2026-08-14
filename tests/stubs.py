@@ -167,9 +167,6 @@ _mod("homeassistant.components")
 _mod("homeassistant.components.select", SelectEntity=SelectEntity)
 
 
-class SensorEntity: ...
-
-
 @dataclass(frozen=True, kw_only=True)
 class EntityDescription:
     """Mirrors HA's frozen kw_only dataclass, which subclasses extend."""
@@ -181,17 +178,18 @@ class EntityDescription:
     entity_category: object | None = None
 
 
+class SensorEntity: ...
+
+
 @dataclass(frozen=True, kw_only=True)
-class ButtonEntityDescription(EntityDescription):
+class SensorEntityDescription(EntityDescription):
     device_class: object | None = None
+    native_unit_of_measurement: str | None = None
+    state_class: object | None = None
 
 
-class ButtonEntity: ...
-
-
-_mod("homeassistant.components.sensor", SensorEntity=SensorEntity)
-_mod("homeassistant.components.button", ButtonEntity=ButtonEntity,
-     ButtonEntityDescription=ButtonEntityDescription)
+_mod("homeassistant.components.sensor", SensorEntity=SensorEntity,
+     SensorEntityDescription=SensorEntityDescription)
 def async_redact_data(data, keys):
     """Mirrors HA's redactor closely enough for the shape we rely on."""
     return {k: ("**REDACTED**" if k in keys else v) for k, v in (data or {}).items()}

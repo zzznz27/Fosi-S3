@@ -20,8 +20,9 @@ from .const import (
     DEFAULT_MODEL,
     DEFAULT_SOURCES,
     DOMAIN,
+    IMPLIED_SERVICES,
     MANUFACTURER,
-    SERVICE_NAMES,
+    PROTOCOL_NAMES,
 )
 from .coordinator import FosiCoordinator
 
@@ -59,28 +60,35 @@ def _text(meta: dict[str, Any], key: str) -> str | None:
     return value.strip() or None if isinstance(value, str) else None
 
 
-def streaming_service(player: Any) -> str | None:
-    """Which protocol is streaming - "Google Cast", "AirPlay", "Roon".
+def streaming_protocol(player: Any) -> str | None:
+    """How audio is arriving - "Google Cast", "AirPlay", "Spotify Connect".
 
-    Always the protocol, derived from serviceID. Reporting whichever field
-    happened to be populated gave "AirPlay" for AirPlay but "YouTube Music"
-    for Cast - a protocol in one case and an app in the other, which is not a
-    consistent thing for a state to be. The app name is an attribute instead.
-
-    An unrecognised serviceID is title-cased rather than dropped, so a
-    protocol nobody here has seen still reports something sensible.
+    Derived from serviceID, which is the stable machine-readable field. An
+    unrecognised id is title-cased rather than dropped, so a protocol nobody
+    here has seen still reports something sensible.
     """
     meta = player_metadata(player)
     service_id = _text(meta, "serviceID")
     if service_id:
-        return SERVICE_NAMES.get(service_id.lower(), service_id.title())
+        return PROTOCOL_NAMES.get(service_id.lower(), service_id.title())
     # No serviceID but something is playing - better than reporting nothing.
     return _text(meta, "serviceName")
 
 
-def streaming_app(player: Any) -> str | None:
-    """The app behind the protocol - "YouTube Music", "Spotify"."""
-    return _text(player_metadata(player), "externalAppName")
+def streaming_service(player: Any) -> str | None:
+    """What is playing - "YouTube Music", "Spotify", "Apple Music".
+
+    Cast names the app in externalAppName. AirPlay does not, so the service is
+    genuinely unknown there - None rather than a guess. The Connect protocols
+    only ever carry one service, so it can be inferred from the protocol even
+    when no app is named.
+    """
+    meta = player_metadata(player)
+    app = _text(meta, "externalAppName")
+    if app:
+        return app
+    service_id = _text(meta, "serviceID")
+    return IMPLIED_SERVICES.get(service_id.lower()) if service_id else None
 
 
 def selectable(sources: dict) -> list[str]:
@@ -220,6 +228,11 @@ class FosiSourceEntity(FosiEntity):
         return options
 
     @property
+    def _network_protocol(self) -> str | None:
+        """How a network source is arriving, when one is."""
+        return streaming_protocol(self.coordinator.data.get("player"))
+
+    @property
     def _network_service(self) -> str | None:
         """What is streaming, when the source is a network protocol.
 
@@ -236,6 +249,7 @@ class FosiSourceEntity(FosiEntity):
             "active_source": self._active_source,
             # Which of the options can actually be commanded right now.
             "selectable_sources": self._commandable_sources,
+            "network_protocol": self._network_protocol,
             "network_service": self._network_service,
         }
 

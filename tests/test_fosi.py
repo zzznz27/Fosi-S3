@@ -29,7 +29,7 @@ from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
-from fosi_audio.sensor import FosiServiceSensor  # noqa: E402
+from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
@@ -44,7 +44,7 @@ from fosi_audio.entity import (  # noqa: E402
     match_source,
     model_name,
     selectable,
-    streaming_app,
+    streaming_protocol,
     streaming_service,
 )
 
@@ -649,9 +649,11 @@ def test_network_service_attribute() -> None:
     e = FakeSourceEntity(0)
     e.coordinator.data["player"] = LIVE_PAYLOAD
     R.check("input option stays stable", e._active_source, "Network")
-    R.check("service surfaced separately", e._network_service, "Google Cast")
-    R.check("attribute present", e.extra_state_attributes["network_service"],
-            "Google Cast")
+    R.check("protocol surfaced separately", e._network_protocol, "Google Cast")
+    R.check("service surfaced separately", e._network_service, "YouTube Music")
+    attrs = e.extra_state_attributes
+    R.check("protocol attribute", attrs["network_protocol"], "Google Cast")
+    R.check("service attribute", attrs["network_service"], "YouTube Music")
 
     idle = FakeSourceEntity(3)
     R.check("no player -> no service", idle._network_service, None)
@@ -702,62 +704,87 @@ def test_event_parsing() -> None:
 
 
 def test_streaming_service() -> None:
-    """The state is always the protocol, never sometimes the app.
+    """Protocol and service are separate things and get separate sensors.
 
-    Reporting whichever field happened to be populated gave "AirPlay" for
-    AirPlay but "YouTube Music" for Cast - a protocol in one case and an app
-    in the other, which is not something a condition can be written against.
+    Protocol is how audio arrives - Google Cast, AirPlay, Spotify Connect.
+    Service is what is playing it - YouTube Music, Spotify, Apple Music.
+    Reporting one field for both gave "AirPlay" in one case and "YouTube
+    Music" in another, which nothing can be written against.
     """
-    print("\n== streaming service reports the protocol consistently ==")
+    print("\n== protocol and service are distinguished ==")
 
     def meta(**fields):
         return {"trackRoles": {"mediaData": {"metaData": fields}}}
 
-    R.check(
-        "cast reports the protocol, not the app",
-        streaming_service(LIVE_PAYLOAD),
-        "Google Cast",
-    )
-    R.check(
-        "airplay reports the protocol too",
-        streaming_service(meta(serviceID="airplay", serviceName="AirPlay")),
-        "AirPlay",
-    )
-    R.check(
-        "both are protocols - the whole point",
-        streaming_service(LIVE_PAYLOAD) != streaming_app(LIVE_PAYLOAD),
-        True,
-    )
-    R.check("app is still available separately", streaming_app(LIVE_PAYLOAD),
-            "YouTube Music")
+    cases = [
+        # payload, protocol, service
+        (LIVE_PAYLOAD, "Google Cast", "YouTube Music"),
+        (
+            meta(serviceID="googlecast", externalAppName="Apple Music"),
+            "Google Cast",
+            "Apple Music",
+        ),
+        # AirPlay names no app, so the service is genuinely unknown there.
+        (meta(serviceID="airplay", serviceName="AirPlay"), "AirPlay", None),
+        # Connect protocols only carry one service, so it is implied.
+        (meta(serviceID="spotifyconnect"), "Spotify Connect", "Spotify"),
+        (meta(serviceID="tidalconnect"), "Tidal Connect", "Tidal"),
+        (meta(serviceID="roon"), "Roon", "Roon"),
+    ]
+    for payload, protocol, service in cases:
+        label = protocol or "idle"
+        R.check(f"{label}: protocol", streaming_protocol(payload), protocol)
+        R.check(f"{label}: service", streaming_service(payload), service)
+
+    print("\n-- edges --")
     R.check(
         "unknown protocol is title-cased, not dropped",
-        streaming_service(meta(serviceID="deezer")),
+        streaming_protocol(meta(serviceID="deezer")),
         "Deezer",
     )
     R.check(
+        "unknown protocol implies no service",
+        streaming_service(meta(serviceID="deezer")),
+        None,
+    )
+    R.check(
         "serviceName only, no id",
-        streaming_service(meta(serviceName="Roon")),
+        streaming_protocol(meta(serviceName="Roon")),
         "Roon",
     )
-    R.check("stopped -> None", streaming_service(STOPPED_PAYLOAD), None)
-    R.check("no player -> None", streaming_service(None), None)
-    R.check("garbage -> None", streaming_service("nope"), None)
-    R.check("whitespace only -> None", streaming_service(meta(serviceID="  ")), None)
+    for fn, name in ((streaming_protocol, "protocol"), (streaming_service, "service")):
+        R.check(f"stopped -> no {name}", fn(STOPPED_PAYLOAD), None)
+        R.check(f"no player -> no {name}", fn(None), None)
+        R.check(f"garbage -> no {name}", fn("nope"), None)
+    R.check(
+        "whitespace only -> None",
+        streaming_protocol(meta(serviceID="  ")),
+        None,
+    )
 
-    print("\n-- the entity --")
-    sensor = FosiServiceSensor.__new__(FosiServiceSensor)
-    sensor.coordinator = FakeCoordinator()
-    sensor.coordinator.data = {"player": LIVE_PAYLOAD}
-    R.check("state", sensor.native_value, "Google Cast")
-    attrs = sensor.extra_state_attributes
+    print("\n-- the entities --")
+    R.check("two of them", [d.key for d in SENSORS],
+            ["streaming_protocol", "streaming_service"])
+
+    def sensor(description, player):
+        s = FosiPlayerSensor.__new__(FosiPlayerSensor)
+        s.entity_description = description
+        s.coordinator = FakeCoordinator()
+        s.coordinator.data = {"player": player}
+        return s
+
+    protocol_desc, service_desc = SENSORS
+    R.check("protocol state", sensor(protocol_desc, LIVE_PAYLOAD).native_value,
+            "Google Cast")
+    R.check("service state", sensor(service_desc, LIVE_PAYLOAD).native_value,
+            "YouTube Music")
+
+    attrs = sensor(protocol_desc, LIVE_PAYLOAD).extra_state_attributes
     R.check("service_id is the machine-readable one", attrs["service_id"], "googlecast")
     R.check("service_name", attrs["service_name"], "Casting YouTube Music")
     R.check("app_name", attrs["app_name"], "YouTube Music")
 
-    idle = FosiServiceSensor.__new__(FosiServiceSensor)
-    idle.coordinator = FakeCoordinator()
-    idle.coordinator.data = {"player": STOPPED_PAYLOAD}
+    idle = sensor(service_desc, STOPPED_PAYLOAD)
     R.check("idle state is None, not a placeholder", idle.native_value, None)
     R.check("idle attrs are None", idle.extra_state_attributes["service_id"], None)
 

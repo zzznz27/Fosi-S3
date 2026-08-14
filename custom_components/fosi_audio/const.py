@@ -114,13 +114,13 @@ DEFAULT_VOLUME_STEPS: Final = 100
 #   path/role/value. Verified optional; we do not send it.
 # --------------------------------------------------------------------------
 
-# serviceID -> display name for the streaming-service sensor.
+# The device distinguishes two things and so do we:
 #
-# The sensor reports the PROTOCOL, always. Reporting whichever field happened
-# to be populated gave "AirPlay" for AirPlay but "YouTube Music" for Cast -
-# a protocol in one case and an app in the other, which is not a consistent
-# thing to put in a state. The app name is an attribute instead.
-SERVICE_NAMES: Final[dict[str, str]] = {
+#   protocol - how audio is arriving: Google Cast, AirPlay, Spotify Connect
+#   service  - what is playing it:    YouTube Music, Spotify, Apple Music
+#
+# serviceID -> protocol display name.
+PROTOCOL_NAMES: Final[dict[str, str]] = {
     "googlecast": "Google Cast",
     "airplay": "AirPlay",
     "spotify": "Spotify Connect",
@@ -133,6 +133,22 @@ SERVICE_NAMES: Final[dict[str, str]] = {
     "bluetooth": "Bluetooth",
     "upnp": "UPnP",
     "dlna": "DLNA",
+}
+
+# serviceID -> the service it implies, for protocols that only ever carry one.
+#
+# Cast and AirPlay carry anything, so the service has to come from
+# externalAppName; Cast populates it, AirPlay does not. The Connect protocols
+# are single-service by definition, so the protocol name tells us the service
+# even when the device names no app.
+IMPLIED_SERVICES: Final[dict[str, str]] = {
+    "spotify": "Spotify",
+    "spotifyconnect": "Spotify",
+    "tidal": "Tidal",
+    "tidalconnect": "Tidal",
+    "qobuz": "Qobuz",
+    "qobuzconnect": "Qobuz",
+    "roon": "Roon",
 }
 
 PLAYER_CONTROL_PATH: Final = "player:player/control"
