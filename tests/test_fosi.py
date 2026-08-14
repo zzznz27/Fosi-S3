@@ -109,6 +109,7 @@ class FakeCoordinator:
     exercised, not reimplementations of them.
     """
 
+    _merge = FosiCoordinator._merge
     apply_update = FosiCoordinator.apply_update
     apply_optimistic = FosiCoordinator.apply_optimistic
     volume_to_level = FosiCoordinator.volume_to_level
@@ -122,9 +123,20 @@ class FakeCoordinator:
         self.volume_map = []
         self.last_updated = None
         self.last_update_success = True
+        # async_set_updated_data reschedules the poll; async_update_listeners
+        # does not. Which one gets called is the whole point of the fix.
+        self.reschedules = 0
+        self.notifications = 0
+
+    def __init_subclass__(cls, **kw):  # noqa: D105
+        super().__init_subclass__(**kw)
 
     def async_set_updated_data(self, data) -> None:
         self.data = data
+        self.reschedules += 1
+
+    def async_update_listeners(self) -> None:
+        self.notifications += 1
 
     async def async_request_refresh(self) -> None:
         self.refreshes += 1
@@ -628,6 +640,37 @@ def test_conditional_polling() -> None:
     R.check("never skips the core keys", skip("volume", {}), False)
 
 
+def test_events_do_not_starve_the_poll() -> None:
+    """A pushed event must not reschedule the poll.
+
+    The device pushes playTime about once a second. Rescheduling on every one
+    meant the poll never ran while anything played, so events became the only
+    path for every value - and a single missed event was permanent. The input
+    select sat on "HDMI In" through a whole AirPlay session because it never
+    saw the one event that changed it.
+    """
+    print("\n== pushed events leave the poll timer alone ==")
+    co = FakeCoordinator()
+    co.data = {}
+
+    co.apply_update(source=0, volume=40)
+    R.check("listeners notified", co.notifications, 1)
+    R.check("poll NOT rescheduled", co.reschedules, 0)
+    R.check("value published", co.data["source"], 0)
+
+    for _ in range(50):
+        co.apply_update(play_time=1000)
+    R.check("50 playTime pushes still reschedule nothing", co.reschedules, 0)
+    R.check("but every one notifies", co.notifications, 51)
+
+    print("\n-- a command still resets it, so the confirming read cannot race --")
+    cmd = FakeCoordinator()
+    cmd.data = {}
+    cmd.apply_optimistic(source=3)
+    R.check("command reschedules", cmd.reschedules, 1)
+    R.check("and publishes", cmd.data["source"], 3)
+
+
 def test_position_timestamp() -> None:
     """media_position_updated_at has to move whenever the position does.
 
@@ -911,6 +954,7 @@ def main() -> int:
         test_transport_commands,
         test_conditional_polling,
         test_event_parsing,
+        test_events_do_not_starve_the_poll,
         test_position_timestamp,
         test_network_service_attribute,
         test_streaming_service,
