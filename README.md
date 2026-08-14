@@ -50,24 +50,6 @@ Updates are pushed by the device over its event API, so a track change or a
 press on the remote appears in a fraction of a second. Polling continues
 underneath as a safety net.
 
-### Volume is the device's own scale, and it is steep
-
-Home Assistant's 0–100% maps 1:1 onto the device's own 0–100 volume, so the
-slider always agrees with the front panel and the Fosi app. That scale is
-weighted heavily towards the top:
-
-| Slider | dB | Roughly |
-|---|---|---|
-| 50% | −30 dB | an eighth of full loudness |
-| 60% | −20 dB | a quarter |
-| 80% | −10 dB | half |
-| 100% | 0 dB | full |
-
-Sixty of the device's hundred steps sit below −20 dB, so the usable range is
-the top half of the slider. This is the hardware's curve, not a fault in the
-integration — the media player's `volume_db` attribute reports the dB the
-current setting actually produces.
-
 ## Requirements
 
 - Home Assistant 2024.12 or newer
