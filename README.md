@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/zzznz27/Fosi-S3/refs/heads/main/custom_components/fosi_audio/brand/icon.png" alt="Fosi Audio logo" title="Fosi Audio" align="right" height="60" />  
+
 # Fosi Audio — Home Assistant integration
 
 [![CI](https://github.com/zzznz27/Fosi-S3/actions/workflows/ci.yml/badge.svg)](https://github.com/zzznz27/Fosi-S3/actions/workflows/ci.yml)
