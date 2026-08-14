@@ -158,6 +158,12 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
         if controls.get(CONTROL_KEY_PREVIOUS):
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+        # TURN_OFF is what puts a power icon in the transport row, which is
+        # how every other Cast device offers "end the session". It maps to the
+        # same stop verb - the device has no standby to switch off, so there
+        # is deliberately no TURN_ON to pair with it.
+        if controls:
+            features |= MediaPlayerEntityFeature.TURN_OFF
         # STOP is the one exception to trusting `controls`: it is accepted on a
         # Cast source that does not advertise it (verified on hardware), so
         # gating strictly would hide a button that works. Offer it whenever a
@@ -266,6 +272,15 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
             return
         await self._async_control(control=CONTROL_TOGGLE)
         self._optimistic_state(MediaPlayerState.PAUSED)
+
+    async def async_turn_off(self) -> None:
+        """End the streaming session.
+
+        The device is an amplifier with no standby node, so this is not a
+        power switch - it does what the power icon does on a Cast device,
+        which is quit whatever is streaming. Same verb as stop.
+        """
+        await self.async_media_stop()
 
     async def async_media_stop(self) -> None:
         await self._async_control(control=CONTROL_STOP)
