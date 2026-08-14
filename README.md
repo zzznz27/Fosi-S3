@@ -68,16 +68,49 @@ reports the actual dB if you want to see it.
 
 ## Install
 
-**HACS:** ⋮ → Custom repositories → add this repo as category **Integration** →
-install → restart.
+### HACS
 
-The device is usually **discovered automatically** after a restart — it
-advertises itself over mDNS, and Home Assistant will offer it under
-Devices & Services. Discovery is confirmed against the device's own API
-before it is offered, so other Cast hardware on your network is never
-mistaken for a Fosi.
+This is not in the HACS default store, so it has to be added as a custom
+repository first. That is a one-off; updates arrive normally afterwards.
 
-**Manual:**
+You need [HACS](https://hacs.xyz) already installed.
+
+1. Open **HACS** in the Home Assistant sidebar.
+2. Click the **⋮** menu, top right, and choose **Custom repositories**.
+3. Paste the repository URL:
+
+   ```
+   https://github.com/zzznz27/Fosi-S3
+   ```
+
+4. Set **Type** (or **Category**) to **Integration**, then click **Add**.
+5. Close the dialog. Search HACS for **Fosi Audio** and open it.
+6. Click **Download**, accept the version offered, and **restart Home
+   Assistant**.
+
+The restart is not optional — Home Assistant only scans for new custom
+integrations at startup.
+
+#### Then add the device
+
+After the restart the S3 is usually **discovered automatically**. Look under
+**Settings → Devices & Services**; it appears as a discovered device, and you
+only have to confirm it. No IP to type.
+
+Discovery is confirmed against the device's own API before it is offered, so
+other Cast hardware on your network is never mistaken for a Fosi.
+
+If it does not appear — mDNS does not always cross VLANs or subnets — add it
+by hand: **Settings → Devices & Services → Add Integration → Fosi Audio**, and
+enter the device's IP.
+
+#### Updating
+
+HACS shows an update on its own dashboard when a new version is released. Open
+the integration in HACS, click **Update**, then **restart Home Assistant**
+again. Your configuration and entity IDs are preserved.
+
+### Manual
 
 ```bash
 cp -r custom_components/fosi_audio /config/custom_components/
