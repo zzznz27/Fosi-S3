@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from homeassistant.util import dt as dt_util
+
 from .api import NsdkClient, NsdkConnectionError, NsdkError, NsdkPathError
-from .const import DEFAULT_VOLUME_STEPS, DOMAIN, POLL_PATHS, VOLUME_MAP_PATH
+from .const import (
+    CONTROL_KEY_PLAY_MODE,
+    DEFAULT_VOLUME_STEPS,
+    DOMAIN,
+    PLAYER_STATE_PLAYING,
+    POLL_PATHS,
+    VOLUME_MAP_PATH,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +53,8 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # from this in entity.py, and confusing the two is easy.
         self.identity: dict[str, Any] = {}
         self.volume_map: list[float] = []
+        # When the last successful poll landed, for media_position_updated_at.
+        self.last_updated: datetime | None = None
         # False until we know whether this device has a usable volume curve.
         # A read that merely timed out must not be mistaken for "no curve".
         self._volume_map_settled = False
@@ -126,7 +137,7 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Sequential on purpose. This is a small embedded webserver and the
         # settings tree is not worth hammering with concurrent requests.
         for key, path in POLL_PATHS.items():
-            if path in self._dead_paths:
+            if path in self._dead_paths or self._skip(key, data):
                 data[key] = None
                 continue
             try:
@@ -141,7 +152,32 @@ class FosiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except NsdkError as exc:
                 _LOGGER.debug("Read of %s failed: %s", path, exc)
                 data[key] = None
+
+        # Timestamp so media_position can be extrapolated between polls; the
+        # progress bar sticks without it.
+        self.last_updated = dt_util.utcnow()
         return data
+
+    @staticmethod
+    def _skip(key: str, data: dict[str, Any]) -> bool:
+        """Whether this cycle can skip a request.
+
+        Both player extras are meaningless unless something is actually
+        playing, and every skipped key is one fewer round trip against a
+        device that is often slow. Relies on POLL_PATHS reading "player"
+        first.
+        """
+        if key not in ("play_time", "play_mode"):
+            return False
+        player = data.get("player")
+        if not isinstance(player, dict):
+            return True
+        if key == "play_time":
+            return player.get("state") != PLAYER_STATE_PLAYING
+        # Truthiness, not key presence: a Cast source reports "playMode": {},
+        # meaning the key exists but play modes are not supported.
+        controls = player.get("controls") or {}
+        return not controls.get(CONTROL_KEY_PLAY_MODE)
 
     # ------------------------------------------------------------ mapping
 

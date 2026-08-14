@@ -18,12 +18,24 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 |---|---|
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
-| `media_player.<name>` | Source, volume, mute |
+| `media_player.<name>` | Source, volume, mute, transport, now-playing |
 
-No transport controls — playback belongs to whichever protocol is streaming to
-the device. Use the `cast` entity for play/pause/next.
+Transport covers play/pause, next, previous, stop and — where the source
+supports it — seek and shuffle/repeat. It works for whatever is streaming,
+including AirPlay, Spotify Connect, Tidal Connect and Bluetooth, none of which
+Home Assistant can otherwise control.
 
-Volume and mute are only advertised if the device answers on those nodes.
+Now-playing gives title, artist, album, artwork and position.
+
+### Buttons match what the source can actually do
+
+The device reports which transport actions the current source supports, and
+the entity advertises only those. So HDMI, optical and line-in get no
+transport buttons at all — there is no player behind them — and a Cast stream
+gets play/pause, next, previous and stop but not seek.
+
+Volume and mute likewise only appear if the device answers on those nodes. The
+entity degrades rather than offering controls that fail.
 
 ## Requirements
 
@@ -79,6 +91,43 @@ can be supported without touching code:
 | `state` | What `settings:/custom/lastAudioSource` reads when this input is live. |
 
 Leave the field blank to restore the defaults.
+
+## Services
+
+**`fosi_audio.seek_relative`** — jump forward or back from the current
+position, since Home Assistant's built-in seek is absolute only.
+
+```yaml
+action: fosi_audio.seek_relative
+target:
+  entity_id: media_player.living_room
+data:
+  offset: -30        # seconds; negative seeks backwards
+```
+
+## Using it alongside Cast
+
+Both this integration and the `cast` integration can control a Cast stream.
+Cast carries richer session metadata; this one switches inputs. A built-in
+`universal` media player combines them into one card:
+
+```yaml
+media_player:
+  - platform: universal
+    name: Living Room Receiver
+    children:
+      - media_player.living_room_reciever      # the cast entity
+    commands:
+      select_source:
+        action: select.select_option
+        target:
+          entity_id: select.living_room_input
+        data:
+          option: "{{ source }}"
+    attributes:
+      source: select.living_room_input|state
+      source_list: select.living_room_input|attribute.selectable_sources
+```
 
 ## Network sources
 

@@ -94,15 +94,49 @@ class CoordinatorEntity(_Generic):
     def available(self): return self.coordinator.last_update_success
 
 class SelectEntity: ...
-class MediaPlayerEntity: ...
+
+
+class MediaPlayerEntity:
+    """Mirrors HA's _attr_* -> property fallback for the bits we rely on."""
+
+    _attr_media_content_type = None
+
+    @property
+    def media_content_type(self):
+        return self._attr_media_content_type
+class _Str(str):
+    pass
+
 class MediaPlayerState:
-    ON, OFF, IDLE = "on", "off", "idle"
+    ON = _Str("on")
+    OFF = _Str("off")
+    IDLE = _Str("idle")
+    PLAYING = _Str("playing")
+    PAUSED = _Str("paused")
+    BUFFERING = _Str("buffering")
+
+class MediaType:
+    MUSIC = "music"
+
+class RepeatMode(str):
+    OFF = "off"
+    ONE = "one"
+    ALL = "all"
+    def __new__(cls, value): return str.__new__(cls, value)
 
 class MediaPlayerEntityFeature(IntFlag):
     SELECT_SOURCE = 1
     VOLUME_MUTE = 2
     VOLUME_SET = 4
     VOLUME_STEP = 8
+    PLAY = 16
+    PAUSE = 32
+    STOP = 64
+    NEXT_TRACK = 128
+    PREVIOUS_TRACK = 256
+    SEEK = 512
+    SHUFFLE_SET = 1024
+    REPEAT_SET = 2048
 
 _mod("homeassistant")
 _mod("homeassistant.config_entries", ConfigEntry=ConfigEntry, ConfigFlow=ConfigFlow,
@@ -126,4 +160,16 @@ _mod("homeassistant.components")
 _mod("homeassistant.components.select", SelectEntity=SelectEntity)
 _mod("homeassistant.components.media_player", MediaPlayerEntity=MediaPlayerEntity,
      MediaPlayerEntityFeature=MediaPlayerEntityFeature,
-     MediaPlayerState=MediaPlayerState)
+     MediaPlayerState=MediaPlayerState, MediaType=MediaType, RepeatMode=RepeatMode)
+
+
+class _Platform:
+    def async_register_entity_service(self, *a, **kw): ...
+
+
+_mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object,
+     async_get_current_platform=lambda: _Platform())
+_mod("homeassistant.util")
+_dt = _mod("homeassistant.util.dt", utcnow=lambda: __import__("datetime").datetime(
+    2026, 8, 13, 12, 0, 0))
+sys.modules["homeassistant.util"].dt = _dt

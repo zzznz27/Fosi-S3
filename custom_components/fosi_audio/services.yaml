@@ -1,0 +1,16 @@
+seek_relative:
+  target:
+    entity:
+      integration: fosi_audio
+      domain: media_player
+  fields:
+    offset:
+      required: true
+      example: -30
+      selector:
+        number:
+          min: -3600
+          max: 3600
+          step: 1
+          unit_of_measurement: seconds
+          mode: box

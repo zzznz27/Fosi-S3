@@ -62,11 +62,17 @@ DEFAULT_SOURCES: Final[dict[str, dict]] = {
 # Nodes polled every update. Missing nodes are tolerated and reported as None.
 # Keep this list short: every entry is one HTTP round trip per cycle against a
 # small embedded webserver that is often slow to answer.
+#
+# Order matters: "player" must be read before "play_time" and "play_mode",
+# which the coordinator skips based on what the player just reported.
 POLL_PATHS: Final[dict[str, str]] = {
     "source": SOURCE_STATE_PATH,
     "mute": "settings:/mediaPlayer/mute",
     "volume": "player:volume",
     "output_mode": "settings:/custom/audioOutputMode",
+    "player": "player:player/data/value",
+    "play_time": "player:player/data/playTime",
+    "play_mode": "player:player/data/playMode",
 }
 
 VOLUME_MAP_PATH: Final = "settings:/mediaPlayer/volumeMap"
@@ -87,6 +93,71 @@ ATTENUATION_PATH: Final = "settings:/mediaPlayer/attenuation"  # read-only, deri
 
 # Fallback scale when the device gives us no volumeMap to size the range from.
 DEFAULT_VOLUME_STEPS: Final = 100
+
+# --------------------------------------------------------------------------
+# Transport.
+#
+# player:player/control is a single action node taking a plain JSON object -
+# NOT a child node per verb, and NOT a tagged union. Names came from
+# /webclient/index.js; player: does not enumerate, so getRows on the control
+# node returns invalidPath and none of this is discoverable by crawling.
+#
+# CONFIRMED on hardware:
+#   {"control": "pause"} is a play/pause TOGGLE. The device's own web client
+#   sends it for both directions of its play/pause button, which is why the
+#   controls object below advertises "pause" and never "play".
+#
+#   {"control": "play"} returns HTTP 500 "Directory is empty. No playable
+#   items found." on a Cast source - it is the wrong verb there, not proof
+#   that resuming is impossible.
+#
+#   The web client also sends a top-level {"platform": "windows"} beside
+#   path/role/value. Verified optional; we do not send it.
+# --------------------------------------------------------------------------
+
+PLAYER_CONTROL_PATH: Final = "player:player/control"
+PLAYER_DATA_PATH: Final = "player:player/data/value"
+PLAY_TIME_PATH: Final = "player:player/data/playTime"
+PLAY_MODE_PATH: Final = "player:player/data/playMode"
+
+# Values seen in player:player/data/value["state"].
+PLAYER_STATE_PLAYING: Final = "playing"
+PLAYER_STATE_PAUSED: Final = "paused"
+PLAYER_STATE_STOPPED: Final = "stopped"
+
+CONTROL_TOGGLE: Final = "pause"  # toggles play/pause - see above
+CONTROL_PLAY: Final = "play"
+CONTROL_STOP: Final = "stop"
+CONTROL_NEXT: Final = "next"
+CONTROL_PREVIOUS: Final = "previous"
+CONTROL_SEEK: Final = "seekTime"
+CONTROL_PLAY_MODE: Final = "changePlayMode"
+
+# Keys of the device's "controls" object, which advertises what the *current
+# source* supports. Note next_ carries a trailing underscore, mirroring the
+# i32_/bool_ convention - getting this wrong silently drops the next button.
+CONTROL_KEY_PAUSE: Final = "pause"
+CONTROL_KEY_PLAY: Final = "play"
+CONTROL_KEY_NEXT: Final = "next_"
+CONTROL_KEY_PREVIOUS: Final = "previous"
+CONTROL_KEY_STOP: Final = "stop"
+CONTROL_KEY_SEEK: Final = "seek"
+CONTROL_KEY_PLAY_MODE: Final = "playMode"
+
+# playMode is a single string encoding both shuffle and repeat - a 2x3 matrix.
+# Full enum taken from NsdkPlayerPlayMode in the web client bundle.
+# Keyed (shuffle, repeat) where repeat is HA's "off" | "one" | "all".
+PLAY_MODES: Final[dict[tuple[bool, str], str]] = {
+    (False, "off"): "normal",
+    (True, "off"): "shuffle",
+    (False, "one"): "repeatOne",
+    (True, "one"): "shuffleRepeatOne",
+    (False, "all"): "repeatAll",
+    (True, "all"): "shuffleRepeatAll",
+}
+PLAY_MODE_LOOKUP: Final[dict[str, tuple[bool, str]]] = {
+    mode: key for key, mode in PLAY_MODES.items()
+}
 
 # Analogue vs digital output - an either/or toggle on this hardware.
 # settings:/custom/audioOutputMode: false = RCA/XLR Out, true = Optical Out.
