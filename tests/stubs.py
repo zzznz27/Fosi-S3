@@ -188,6 +188,10 @@ class SensorEntityDescription(EntityDescription):
     state_class: object | None = None
 
 
+class ButtonEntity: ...
+
+
+_mod("homeassistant.components.button", ButtonEntity=ButtonEntity)
 _mod("homeassistant.components.sensor", SensorEntity=SensorEntity,
      SensorEntityDescription=SensorEntityDescription)
 def async_redact_data(data, keys):

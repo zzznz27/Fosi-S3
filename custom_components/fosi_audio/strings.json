@@ -67,6 +67,11 @@
       "streaming_service": {
         "name": "Streaming service"
       }
+    },
+    "button": {
+      "stop_streaming": {
+        "name": "Stop streaming"
+      }
     }
   }
 }

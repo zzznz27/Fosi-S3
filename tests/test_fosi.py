@@ -30,6 +30,7 @@ from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
 from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
+from fosi_audio.button import FosiStopButton  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
@@ -790,6 +791,60 @@ def test_streaming_service() -> None:
 
 
 
+def test_stop_button() -> None:
+    """Ends the streaming session, and only offers itself when there is one."""
+    print("\n== stop streaming button ==")
+
+    def button(player):
+        b = FosiStopButton.__new__(FosiStopButton)
+        b.coordinator = FakeCoordinator()
+        b.coordinator.data = {"player": player}
+        return b
+
+    playing = button(LIVE_PAYLOAD)
+    R.check("available while playing", playing.available, True)
+    asyncio.run(playing.async_press())
+    R.check(
+        "sends the stop verb",
+        playing.coordinator.client.sent[-1],
+        ("player:player/control", {"control": "stop"}, "activate"),
+    )
+    # The device reflects a write ~0.5s late, so the session is cleared
+    # optimistically rather than re-read.
+    R.check("session cleared optimistically", playing.coordinator.data["player"], {})
+
+    print("\n-- greyed out when there is nothing to stop --")
+    R.check("stopped", button(STOPPED_PAYLOAD).available, False)
+    R.check("no player at all (HDMI, optical, line-in)", button(None).available, False)
+    idle = button(STOPPED_PAYLOAD)
+    R.check("and nothing is sent", idle.coordinator.client.sent, [])
+
+
+def test_stale_entity_sweep() -> None:
+    """Entities from platforms and betas that are gone must be swept.
+
+    Registry entries outlive the code that created them, so the like/dislike
+    buttons lingered as permanently unavailable rows. A domain check alone
+    stopped being enough once the button platform came back for stop.
+    """
+    print("\n== stale entities are named, not just domain-checked ==")
+    import fosi_audio
+
+    R.check(
+        "button is a live platform again",
+        "button" in {p for p in fosi_audio.PLATFORMS},
+        True,
+    )
+    suffixes = fosi_audio.REMOVED_ENTITY_SUFFIXES
+    R.check("like is swept by name", "abc123_like".endswith(suffixes), True)
+    R.check("dislike is swept by name", "abc123_dislike".endswith(suffixes), True)
+    R.check(
+        "the stop button is not swept",
+        "abc123_stop_streaming".endswith(suffixes),
+        False,
+    )
+
+
 def test_zeroconf_matcher() -> None:
     """The manifest matcher must not claim every Cast device on the network.
 
@@ -874,6 +929,8 @@ def main() -> int:
         test_position_timestamp,
         test_network_service_attribute,
         test_streaming_service,
+        test_stop_button,
+        test_stale_entity_sweep,
         test_zeroconf_matcher,
         test_diagnostics_redaction,
         test_model_name,
