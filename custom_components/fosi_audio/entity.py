@@ -37,6 +37,28 @@ def match_source(sources: dict, state: Any) -> str | None:
     return None
 
 
+def streaming_service(player: Any) -> str | None:
+    """Name of the app streaming to the device, if any.
+
+    Prefers externalAppName ("YouTube Music") over serviceName ("Casting
+    YouTube Music"), which is prose the device builds for its own display.
+    Returns None rather than a placeholder when nothing is streaming, so
+    automations do not have to special-case a magic string.
+    """
+    node: Any = player
+    for key in ("trackRoles", "mediaData", "metaData"):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    if not isinstance(node, dict):
+        return None
+    for key in ("externalAppName", "serviceName"):
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def selectable(sources: dict) -> list[str]:
     """Sources that can actually be commanded. Excludes state-only entries."""
     return [name for name, spec in sources.items() if spec.get("path")]
@@ -181,18 +203,7 @@ class FosiSourceEntity(FosiEntity):
         automations comparing against it keep working; the live service is
         surfaced here instead, and as app_name on the media player.
         """
-        player = self.coordinator.data.get("player")
-        if not isinstance(player, dict):
-            return None
-        node: Any = player
-        for key in ("trackRoles", "mediaData", "metaData"):
-            if not isinstance(node, dict):
-                return None
-            node = node.get(key)
-        if not isinstance(node, dict):
-            return None
-        name = node.get("externalAppName") or node.get("serviceName")
-        return name.strip() or None if isinstance(name, str) else None
+        return streaming_service(self.coordinator.data.get("player"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

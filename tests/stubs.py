@@ -6,6 +6,7 @@ without a Home Assistant install.
 
 import sys
 import types
+from dataclasses import dataclass
 from enum import IntFlag
 
 
@@ -51,8 +52,10 @@ _mod("voluptuous", Schema=Schema, Required=Required, All=All, Coerce=Coerce,
 
 # --------------------------------------------------------- homeassistant.*
 class Platform:
+    BUTTON = "button"
     MEDIA_PLAYER = "media_player"
     SELECT = "select"
+    SENSOR = "sensor"
 
 class ConfigEntry(_Generic):
     def __init__(self, entry_id="e1", title="S3", data=None, options=None):
@@ -158,6 +161,42 @@ _mod("homeassistant.helpers.update_coordinator",
      CoordinatorEntity=CoordinatorEntity)
 _mod("homeassistant.components")
 _mod("homeassistant.components.select", SelectEntity=SelectEntity)
+
+
+class SensorEntity: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class EntityDescription:
+    """Mirrors HA's frozen kw_only dataclass, which subclasses extend."""
+
+    key: str
+    translation_key: str | None = None
+    icon: str | None = None
+    name: str | None = None
+    entity_category: object | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class ButtonEntityDescription(EntityDescription):
+    device_class: object | None = None
+
+
+class ButtonEntity: ...
+
+
+_mod("homeassistant.components.sensor", SensorEntity=SensorEntity)
+_mod("homeassistant.components.button", ButtonEntity=ButtonEntity,
+     ButtonEntityDescription=ButtonEntityDescription)
+def async_redact_data(data, keys):
+    """Mirrors HA's redactor closely enough for the shape we rely on."""
+    return {k: ("**REDACTED**" if k in keys else v) for k, v in (data or {}).items()}
+
+
+_mod("homeassistant.components.diagnostics", async_redact_data=async_redact_data)
+_mod("homeassistant.helpers.service_info")
+_zc = _mod("homeassistant.helpers.service_info.zeroconf", ZeroconfServiceInfo=object)
+sys.modules["homeassistant.helpers.service_info"].zeroconf = _zc
 _mod("homeassistant.components.media_player", MediaPlayerEntity=MediaPlayerEntity,
      MediaPlayerEntityFeature=MediaPlayerEntityFeature,
      MediaPlayerState=MediaPlayerState, MediaType=MediaType, RepeatMode=RepeatMode)

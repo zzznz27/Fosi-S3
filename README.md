@@ -19,6 +19,8 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `select.<name>_input` | Bluetooth, Line In, HDMI In, Optical In |
 | `select.<name>_output_mode` | RCA/XLR Out or Optical Out (mutually exclusive) |
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
+| `sensor.<name>_streaming_service` | Which app is streaming — YouTube Music, Spotify, AirPlay |
+| `button.<name>_like` / `_dislike` | Rate the current track, where the source supports it |
 
 Transport covers play/pause, next, previous, stop and — where the source
 supports it — seek and shuffle/repeat. It works for whatever is streaming,
@@ -68,6 +70,12 @@ reports the actual dB if you want to see it.
 
 **HACS:** ⋮ → Custom repositories → add this repo as category **Integration** →
 install → restart.
+
+The device is usually **discovered automatically** after a restart — it
+advertises itself over mDNS, and Home Assistant will offer it under
+Devices & Services. Discovery is confirmed against the device's own API
+before it is offered, so other Cast hardware on your network is never
+mistaken for a Fosi.
 
 **Manual:**
 
@@ -164,6 +172,17 @@ in automations that pick an input:
 ```yaml
 {{ state_attr('select.living_room_input', 'selectable_sources') }}
 ```
+
+## Reporting a problem
+
+Download diagnostics from the device page (⋮ → **Download diagnostics**) and
+attach it to the issue. It lists which nodes answered, what the device said
+its current source supports, and which paths came back as non-existent — which
+is almost always the reason a feature is missing. Serial, MAC and the device
+name are redacted.
+
+This matters most for hardware nobody here owns: every node path was worked
+out from one S3, and the settings tree already mentions an S3 Lite and an S5.
 
 ## Troubleshooting
 

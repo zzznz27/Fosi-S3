@@ -14,6 +14,10 @@
         "data": {
           "host": "Host"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Fosi Audio",
+        "description": "Add {name}?"
       }
     },
     "error": {
@@ -23,7 +27,9 @@
     "abort": {
       "already_configured": "This device is already configured.",
       "reconfigure_successful": "Address updated.",
-      "wrong_device": "That address is a different device. Add it as a new integration instead."
+      "wrong_device": "That address is a different device. Add it as a new integration instead.",
+      "not_streamsdk": "Responded, but does not look like a StreamSDK device.",
+      "cannot_connect": "Could not reach the discovered device."
     }
   },
   "options": {
@@ -64,6 +70,19 @@
       },
       "output_mode": {
         "name": "Output mode"
+      }
+    },
+    "sensor": {
+      "streaming_service": {
+        "name": "Streaming service"
+      }
+    },
+    "button": {
+      "like": {
+        "name": "Like"
+      },
+      "dislike": {
+        "name": "Dislike"
       }
     }
   }

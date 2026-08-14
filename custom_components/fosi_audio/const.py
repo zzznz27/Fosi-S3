@@ -132,6 +132,8 @@ CONTROL_NEXT: Final = "next"
 CONTROL_PREVIOUS: Final = "previous"
 CONTROL_SEEK: Final = "seekTime"
 CONTROL_PLAY_MODE: Final = "changePlayMode"
+CONTROL_LIKE: Final = "like"
+CONTROL_DISLIKE: Final = "dislike"
 
 # Keys of the device's "controls" object, which advertises what the *current
 # source* supports. Note next_ carries a trailing underscore, mirroring the

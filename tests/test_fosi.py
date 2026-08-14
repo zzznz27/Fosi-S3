@@ -10,6 +10,7 @@ code under test is the code that ships.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import pathlib
 import re
@@ -28,6 +29,9 @@ from fosi_audio.api import NsdkConnectionError, NsdkPathError  # noqa: E402
 from fosi_audio.config_flow import validate_sources  # noqa: E402
 from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
+from fosi_audio.button import BUTTONS, FosiControlButton  # noqa: E402
+from fosi_audio.sensor import FosiServiceSensor  # noqa: E402
+from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
     MediaPlayerState,
@@ -41,6 +45,7 @@ from fosi_audio.entity import (  # noqa: E402
     match_source,
     model_name,
     selectable,
+    streaming_service,
 )
 
 SOURCES = const.DEFAULT_SOURCES
@@ -116,6 +121,7 @@ class FakeCoordinator:
         self.client = FakeClient()
         self.volume_map = []
         self.last_updated = None
+        self.last_update_success = True
 
     def async_set_updated_data(self, data) -> None:
         self.data = data
@@ -721,6 +727,149 @@ def test_event_parsing() -> None:
     R.check("all itemWithValue", {s["type"] for s in subs}, {"itemWithValue"})
 
 
+def test_streaming_service() -> None:
+    print("\n== streaming service sensor ==")
+    R.check("prefers externalAppName", streaming_service(LIVE_PAYLOAD), "YouTube Music")
+    R.check(
+        "falls back to serviceName",
+        streaming_service(
+            {"trackRoles": {"mediaData": {"metaData": {"serviceName": "AirPlay"}}}}
+        ),
+        "AirPlay",
+    )
+    R.check("stopped -> None", streaming_service(STOPPED_PAYLOAD), None)
+    R.check("no player -> None", streaming_service(None), None)
+    R.check("garbage -> None", streaming_service("nope"), None)
+    R.check(
+        "whitespace only -> None",
+        streaming_service(
+            {"trackRoles": {"mediaData": {"metaData": {"externalAppName": "  "}}}}
+        ),
+        None,
+    )
+
+    print("\n-- the entity --")
+    sensor = FosiServiceSensor.__new__(FosiServiceSensor)
+    sensor.coordinator = FakeCoordinator()
+    sensor.coordinator.data = {"player": LIVE_PAYLOAD}
+    R.check("state", sensor.native_value, "YouTube Music")
+    attrs = sensor.extra_state_attributes
+    R.check("service_id is the machine-readable one", attrs["service_id"], "googlecast")
+    R.check("service_name", attrs["service_name"], "Casting YouTube Music")
+    R.check("app_name", attrs["app_name"], "YouTube Music")
+
+    idle = FosiServiceSensor.__new__(FosiServiceSensor)
+    idle.coordinator = FakeCoordinator()
+    idle.coordinator.data = {"player": STOPPED_PAYLOAD}
+    R.check("idle state is None, not a placeholder", idle.native_value, None)
+    R.check("idle attrs are None", idle.extra_state_attributes["service_id"], None)
+
+
+def test_like_dislike_buttons() -> None:
+    print("\n== like / dislike buttons ==")
+    CTRL = "player:player/control"
+
+    def button(key, controls):
+        desc = next(d for d in BUTTONS if d.key == key)
+        b = FosiControlButton.__new__(FosiControlButton)
+        b.entity_description = desc
+        b.coordinator = FakeCoordinator()
+        b.coordinator.data = {"player": {"controls": controls}}
+        return b
+
+    supported = button("like", {"like": True, "dislike": True})
+    asyncio.run(supported.async_press())
+    R.check(
+        "like sends the verb",
+        supported.coordinator.client.sent[-1],
+        (CTRL, {"control": "like"}, "activate"),
+    )
+
+    dis = button("dislike", {"like": True, "dislike": True})
+    asyncio.run(dis.async_press())
+    R.check(
+        "dislike sends the verb",
+        dis.coordinator.client.sent[-1],
+        (CTRL, {"control": "dislike"}, "activate"),
+    )
+
+    print("\n-- unavailable where the source does not offer them --")
+    # A Cast stream advertises neither, so the buttons grey out rather than
+    # vanishing - unlike the transport row, an unavailable button keeps its
+    # place, so gating honestly costs no layout stability.
+    cast = button("like", LIVE_PAYLOAD["controls"])
+    R.check("greyed out on Cast", cast.available, False)
+    R.check("available when advertised", supported.available, True)
+    R.check("no player at all", button("like", {}).available, False)
+
+
+def test_zeroconf_matcher() -> None:
+    """The manifest matcher must not claim every Cast device on the network.
+
+    Real `md` values captured by browsing _googlecast._tcp on a household
+    with four Cast devices.
+    """
+    print("\n== zeroconf matcher is narrow enough ==")
+    manifest = json.loads(
+        (HERE.parent / "custom_components" / "fosi_audio" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matchers = manifest.get("zeroconf") or []
+    R.check("declares zeroconf", bool(matchers), True)
+    R.check(
+        "all target the cast service",
+        {m["type"] for m in matchers},
+        {"_googlecast._tcp.local."},
+    )
+    R.check(
+        "none match on type alone",
+        all(m.get("properties") for m in matchers),
+        True,
+    )
+
+    def matches(md: str) -> bool:
+        return any(
+            fnmatch.fnmatch(md.lower(), m["properties"]["md"].lower())
+            for m in matchers
+        )
+
+    R.check("matches the S3", matches("S3"), True)
+    R.check("would match an S3 Lite", matches("S3 Lite"), True)
+    R.check("would match an S5", matches("S5"), True)
+    print("\n-- and rejects the neighbours, captured from a real network --")
+    neighbours = (
+        "Google Nest Hub",
+        "Google Home Mini",
+        "Chromecast",
+        "Google Cast Group",
+    )
+    for md in neighbours:
+        R.check(f"ignores {md!r}", matches(md), False)
+
+
+def test_diagnostics_redaction() -> None:
+    print("\n== diagnostics redact identifying values ==")
+    R.check(
+        "serial, mac and name are redacted",
+        {"serial", "mac", "name"} <= diag.REDACT,
+        True,
+    )
+    identity = {
+        "model": "Fosi S3",
+        "manufacturer": "Fosi Audio",
+        "serial": "S3304CAGA1797",
+        "mac": "50:1E:2D:95:1B:F4",
+        "name": "Living room reciever",
+    }
+    redacted = stubs.async_redact_data(identity, diag.REDACT)
+    R.check("serial hidden", redacted["serial"], "**REDACTED**")
+    R.check("mac hidden", redacted["mac"], "**REDACTED**")
+    R.check("room name hidden", redacted["name"], "**REDACTED**")
+    R.check("model kept - it is the whole point", redacted["model"], "Fosi S3")
+    R.check("manufacturer kept", redacted["manufacturer"], "Fosi Audio")
+
+
 def main() -> int:
     for test in (
         test_packaging_metadata,
@@ -738,6 +887,10 @@ def main() -> int:
         test_event_parsing,
         test_position_timestamp,
         test_network_service_attribute,
+        test_streaming_service,
+        test_like_dislike_buttons,
+        test_zeroconf_matcher,
+        test_diagnostics_redaction,
         test_model_name,
         test_volume_scale,
         test_optimistic_updates,
