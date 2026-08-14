@@ -24,9 +24,13 @@ StreamSDK, so other StreamSDK hardware may work with a different source map.
 | `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
 | `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
 
-Transport covers play/pause, next, previous and stop. It works for whatever is
-streaming, including AirPlay, Spotify Connect, Tidal Connect and Bluetooth,
-none of which Home Assistant can otherwise control.
+Transport covers play/pause, next, previous and stop, plus a power button that
+ends the streaming session — the same control other Cast devices offer. It
+works for whatever is streaming, including AirPlay, Spotify Connect, Tidal
+Connect and Bluetooth, none of which Home Assistant can otherwise control.
+
+The device is an amplifier with no standby, so the power button quits the
+session rather than switching hardware off. There is no matching "on".
 
 Now-playing gives title, artist, album, artwork and position.
 

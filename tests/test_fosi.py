@@ -523,6 +523,21 @@ def test_controls_drive_features() -> None:
     # lists it, verified on hardware.
     R.check("stop offered whenever a player runs", bool(live & F.STOP), True)
 
+    print("\n-- the power icon, as other Cast devices have --")
+    R.check("TURN_OFF offered while playing", bool(live & F.TURN_OFF), True)
+    R.check(
+        "no TURN_ON to pair with it - there is no standby",
+        bool(live & F.TURN_ON),
+        False,
+    )
+    powered = FakePlayer(player=LIVE_PAYLOAD)
+    asyncio.run(powered.async_turn_off())
+    R.check(
+        "power ends the session with the stop verb",
+        powered.sent[-1],
+        ("player:player/control", {"control": "stop"}, "activate"),
+    )
+
     print("\n-- the trailing-underscore trap --")
     wrong = FakePlayer(player={"controls": {"next": True}}).supported_features
     R.check(

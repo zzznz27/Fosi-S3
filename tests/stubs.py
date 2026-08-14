@@ -140,6 +140,8 @@ class MediaPlayerEntityFeature(IntFlag):
     SEEK = 512
     SHUFFLE_SET = 1024
     REPEAT_SET = 2048
+    TURN_ON = 4096
+    TURN_OFF = 8192
 
 _mod("homeassistant")
 _mod("homeassistant.config_entries", ConfigEntry=ConfigEntry, ConfigFlow=ConfigFlow,
