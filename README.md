@@ -24,6 +24,8 @@ StreamSDK hardware may work with a different source map.
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
 | `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
 | `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
+| `number.<name>_bass` | Bass shelf, −10 to +10 dB |
+| `number.<name>_treble` | Treble shelf, −10 to +10 dB |
 
 Transport is play/pause, next, previous, stop, and a power button that ends the
 streaming session — the device is an amplifier with no standby, so there is no
@@ -46,9 +48,49 @@ streams to them, so they can be reported but not selected. The input select
 shows `Network` while one is live; its `selectable_sources` attribute lists the
 inputs that can actually be switched to, which is what automations should read.
 
+Bass and treble are the device's own shelving controls, in 0.5 dB steps. They
+sit in the sound-server chain rather than in a network player, so they apply to
+every input including HDMI. Values beyond ±10 dB are clamped by the device
+rather than rejected.
+
 Updates are pushed by the device over its event API, so a track change or a
 press on the remote appears in a fraction of a second. Polling continues
 underneath as a safety net.
+
+### A night mode for bass
+
+There is no night-mode switch, deliberately — one would have to remember a
+level to restore and would go stale the moment you changed the tone from the
+Fosi app or the front panel. Home Assistant already schedules a number better
+than a switch can:
+
+```yaml
+automation:
+  - alias: Quiet the bass after 10pm
+    triggers:
+      - trigger: time
+        at: "22:00:00"
+    actions:
+      - action: number.set_value
+        target:
+          entity_id: number.living_room_bass
+        data:
+          value: -8
+  - alias: Bass back in the morning
+    triggers:
+      - trigger: time
+        at: "08:00:00"
+    actions:
+      - action: number.set_value
+        target:
+          entity_id: number.living_room_bass
+        data:
+          value: 0
+```
+
+If you would rather restore whatever it was before instead of a fixed number,
+capture a scene while the tone is set how you like it and activate that scene
+in the morning.
 
 ## Requirements
 

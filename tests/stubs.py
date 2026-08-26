@@ -54,8 +54,14 @@ _mod("voluptuous", Schema=Schema, Required=Required, All=All, Coerce=Coerce,
 class Platform:
     BUTTON = "button"
     MEDIA_PLAYER = "media_player"
+    NUMBER = "number"
     SELECT = "select"
     SENSOR = "sensor"
+
+
+class EntityCategory:
+    CONFIG = "config"
+    DIAGNOSTIC = "diagnostic"
 
 class ConfigEntry(_Generic):
     def __init__(self, entry_id="e1", title="S3", data=None, options=None):
@@ -147,7 +153,7 @@ _mod("homeassistant")
 _mod("homeassistant.config_entries", ConfigEntry=ConfigEntry, ConfigFlow=ConfigFlow,
      ConfigFlowResult=ConfigFlowResult, OptionsFlow=OptionsFlow)
 _mod("homeassistant.const", CONF_HOST="host", CONF_SCAN_INTERVAL="scan_interval",
-     Platform=Platform)
+     Platform=Platform, EntityCategory=EntityCategory)
 _mod("homeassistant.core", HomeAssistant=object, callback=lambda f: f)
 _mod("homeassistant.exceptions", HomeAssistantError=HomeAssistantError,
      ConfigEntryNotReady=ConfigEntryNotReady, ConfigEntryError=ConfigEntryError)
@@ -193,7 +199,27 @@ class SensorEntityDescription(EntityDescription):
 class ButtonEntity: ...
 
 
+class NumberEntity:
+    """HA sets native_value from the property; nothing else is relied on."""
+
+    entity_description = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class NumberEntityDescription(EntityDescription):
+    device_class: object | None = None
+    native_unit_of_measurement: str | None = None
+
+
+class NumberMode:
+    AUTO = "auto"
+    BOX = "box"
+    SLIDER = "slider"
+
+
 _mod("homeassistant.components.button", ButtonEntity=ButtonEntity)
+_mod("homeassistant.components.number", NumberEntity=NumberEntity,
+     NumberEntityDescription=NumberEntityDescription, NumberMode=NumberMode)
 _mod("homeassistant.components.sensor", SensorEntity=SensorEntity,
      SensorEntityDescription=SensorEntityDescription)
 def async_redact_data(data, keys):

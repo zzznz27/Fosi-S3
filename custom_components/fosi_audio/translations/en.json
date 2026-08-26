@@ -67,6 +67,14 @@
       "streaming_service": {
         "name": "Streaming service"
       }
+    },
+    "number": {
+      "bass": {
+        "name": "Bass"
+      },
+      "treble": {
+        "name": "Treble"
+      }
     }
   }
 }

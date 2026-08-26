@@ -31,6 +31,7 @@ from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio import events as events_mod  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
 from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
+from fosi_audio.number import TONE_CONTROLS, FosiToneNumber  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
@@ -742,6 +743,55 @@ def test_volume_db_attribute() -> None:
     R.check("no curve, no dB", p.extra_state_attributes["volume_db"], None)
 
 
+def test_tone_controls() -> None:
+    """Bass and treble are plain dB numbers, clamped the way the device does.
+
+    Measured on hardware: the device CLAMPS rather than erroring - asking for
+    -100 settles at -10 - and rounds to the nearest 0.5 dB. The optimistic
+    update has to publish what the device will actually hold, or the slider
+    shows a value the device never took and the next poll yanks it back.
+    """
+    print()
+    print("== bass and treble tone controls ==")
+    settle = FosiToneNumber._settle
+    R.check("clamps low", settle(-100), const.TONE_MIN)
+    R.check("clamps high", settle(99), const.TONE_MAX)
+    R.check("rounds to the 0.5 grid", settle(-2.25), -2.0)
+    R.check("leaves a valid step alone", settle(-2.5), -2.5)
+    R.check("zero is zero", settle(0), 0.0)
+
+    print()
+    print("-- both nodes are polled, so the sliders track the app --")
+    R.check("bass polled", const.POLL_PATHS.get("bass"), const.BASS_PATH)
+    R.check("treble polled", const.POLL_PATHS.get("treble"), const.TREBLE_PATH)
+    R.check("two controls", [d.key for d in TONE_CONTROLS], ["bass", "treble"])
+
+    print()
+    print("-- writing publishes the settled value, never a re-read --")
+    for desc in TONE_CONTROLS:
+        n = FosiToneNumber.__new__(FosiToneNumber)
+        n.entity_description = desc
+        n.coordinator = FakeCoordinator()
+        n.coordinator.data = {desc.key: 0}
+        R.check(f"{desc.key} reads through", n.native_value, 0)
+
+        asyncio.run(n.async_set_native_value(-99))
+        path, value, role = n.coordinator.client.sent[-1]
+        R.check(f"{desc.key} writes its node", path, desc.path)
+        R.check(f"{desc.key} sent as a double", value["type"], "double_")
+        R.check(f"{desc.key} clamped on the wire", value["double_"], const.TONE_MIN)
+        R.check(f"{desc.key} published clamped", n.native_value, const.TONE_MIN)
+        R.check(f"{desc.key} no racing refresh", n.coordinator.refreshes, 0)
+
+    print()
+    print("-- a device that never answered leaves the slider blank --")
+    blank = FosiToneNumber.__new__(FosiToneNumber)
+    blank.entity_description = TONE_CONTROLS[0]
+    blank.coordinator = FakeCoordinator()
+    blank.coordinator.data = {}
+    R.check("no value, no guess", blank.native_value, None)
+
+
 def test_pushes_restore_availability() -> None:
     """A push proves the device is reachable and must clear the failed flag.
 
@@ -1100,6 +1150,7 @@ def main() -> int:
         test_pushes_restore_availability,
         test_event_queue_is_recycled,
         test_event_parsing,
+        test_tone_controls,
         test_events_do_not_starve_the_poll,
         test_position_timestamp,
         test_network_service_attribute,

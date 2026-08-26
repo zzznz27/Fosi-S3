@@ -72,10 +72,24 @@ POLL_PATHS: Final[dict[str, str]] = {
     "output_mode": "settings:/custom/audioOutputMode",
     "player": "player:player/data/value",
     "play_time": "player:player/data/playTime",
+    "bass": "settings:/mediaPlayer/bass",
+    "treble": "settings:/mediaPlayer/treble",
 }
 
 VOLUME_MAP_PATH: Final = "settings:/mediaPlayer/volumeMap"
 MUTE_PATH: Final = "settings:/mediaPlayer/mute"
+
+# Bass and treble shelves, separate from the 10-band EQ. alsaMixerElements
+# maps them to the ALSA "Bass" and "Treble" controls, so they sit in the sound
+# server chain and apply to every input rather than only to a network stream.
+#
+# Measured on hardware: the device CLAMPS rather than erroring - asking for
+# -100 settles at -10 - and rounds to the nearest 0.5 dB.
+BASS_PATH: Final = "settings:/mediaPlayer/bass"
+TREBLE_PATH: Final = "settings:/mediaPlayer/treble"
+TONE_MIN: Final = -10.0
+TONE_MAX: Final = 10.0
+TONE_STEP: Final = 0.5
 
 # Volume lives in the player: namespace, which does not enumerate - the name
 # came out of /webclient/index.js. player:volume is the device's own 0-100
