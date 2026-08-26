@@ -11,6 +11,15 @@ DEFAULT_MODEL: Final = "S3"
 # CONF_SCAN_INTERVAL comes from homeassistant.const - no need to redefine it.
 CONF_SOURCES: Final = "sources"
 
+# Home Assistant renders a volume slider OR volume +/- buttons, never both:
+# the more-info dialog gates the buttons on `VOLUME_STEP && !supportsSliding`,
+# so advertising VOLUME_SET always wins and hides them. Dropping VOLUME_SET is
+# the only way to get the buttons, which makes this a genuine either/or and
+# therefore the user's choice. Default false = keep the slider, so nobody's
+# card changes on upgrade.
+CONF_VOLUME_BUTTONS: Final = "volume_buttons"
+DEFAULT_VOLUME_BUTTONS: Final = False
+
 DEFAULT_SCAN_INTERVAL: Final = 60
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 600

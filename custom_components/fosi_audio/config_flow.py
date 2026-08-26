@@ -23,8 +23,10 @@ from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 from .api import NsdkClient, NsdkConnectionError, NsdkError, NsdkUnsupportedError
 from .const import (
     CONF_SOURCES,
+    CONF_VOLUME_BUTTONS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SOURCES,
+    DEFAULT_VOLUME_BUTTONS,
     DOMAIN,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
@@ -225,6 +227,7 @@ class FosiOptionsFlow(OptionsFlow):
                     data={
                         CONF_SOURCES: sources,
                         CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
+                        CONF_VOLUME_BUTTONS: user_input[CONF_VOLUME_BUTTONS],
                     }
                 )
 
@@ -242,6 +245,12 @@ class FosiOptionsFlow(OptionsFlow):
                     vol.Coerce(int),
                     vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
                 ),
+                vol.Required(
+                    CONF_VOLUME_BUTTONS,
+                    default=options.get(
+                        CONF_VOLUME_BUTTONS, DEFAULT_VOLUME_BUTTONS
+                    ),
+                ): bool,
             }
         )
         return self.async_show_form(

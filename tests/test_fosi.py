@@ -174,11 +174,20 @@ class _FailingClient:
         raise self._exc
 
 
+class FakeEntry:
+    """Just the config-entry surface the entities actually touch."""
+
+    def __init__(self, options=None) -> None:
+        self.entry_id = "test_entry"
+        self.options = options or {}
+
+
 class FakePlayer(FosiMediaPlayer):
     """FosiMediaPlayer without the CoordinatorEntity constructor."""
 
-    def __init__(self, **data) -> None:
+    def __init__(self, options=None, **data) -> None:
         self._sources = SOURCES
+        self._entry = FakeEntry(options)
         self.coordinator = FakeCoordinator()
         self.coordinator.data = {"source": 0, "mute": False, **data}
 
@@ -792,6 +801,41 @@ def test_tone_controls() -> None:
     R.check("no value, no guess", blank.native_value, None)
 
 
+def test_volume_buttons_option() -> None:
+    """Slider and +/- buttons are mutually exclusive in Home Assistant.
+
+    The more-info dialog gates the buttons on
+    `VOLUME_STEP && !supportsSliding`, so VOLUME_SET always wins and hides
+    them. Getting the buttons means withholding VOLUME_SET, which is a real
+    trade rather than a strictly-better setting - hence an option, defaulting
+    to the slider so no existing card changes on upgrade.
+    """
+    print("\n== volume buttons are an either/or with the slider ==")
+    F = MediaPlayerEntityFeature
+
+    default = FakePlayer(volume=40).supported_features
+    R.check("slider by default", bool(default & F.VOLUME_SET), True)
+    R.check("step always advertised", bool(default & F.VOLUME_STEP), True)
+
+    opted = FakePlayer(options={"volume_buttons": True}, volume=40)
+    feats = opted.supported_features
+    R.check("VOLUME_SET withheld", bool(feats & F.VOLUME_SET), False)
+    R.check("so HA draws the buttons", bool(feats & F.VOLUME_STEP), True)
+    R.check("mute is unaffected", bool(feats & F.VOLUME_MUTE), True)
+
+    print("\n-- volume_up/down still work either way --")
+    want = (const.VOLUME_PATH, {"type": "i32_", "i32_": 41}, "value")
+    modes = (("slider mode", FakePlayer(volume=40)), ("button mode", opted))
+    for label, player in modes:
+        asyncio.run(player.async_volume_up())
+        R.check(f"stepped up in {label}", player.sent[-1], want)
+
+    print("\n-- no volume node: neither control is offered --")
+    none = FakePlayer(options={"volume_buttons": True}).supported_features
+    R.check("no set", bool(none & F.VOLUME_SET), False)
+    R.check("no step", bool(none & F.VOLUME_STEP), False)
+
+
 def test_pushes_restore_availability() -> None:
     """A push proves the device is reachable and must clear the failed flag.
 
@@ -1147,6 +1191,7 @@ def main() -> int:
         test_transport_commands,
         test_poll_merges_rather_than_replacing,
         test_volume_db_attribute,
+        test_volume_buttons_option,
         test_pushes_restore_availability,
         test_event_queue_is_recycled,
         test_event_parsing,

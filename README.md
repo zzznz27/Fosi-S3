@@ -166,6 +166,12 @@ From **Configure** on the integration card. No YAML.
 device pushes its own changes. A poll fills in values the event stream has not
 supplied; it never overwrites something newer.
 
+**Volume buttons instead of a slider** (default off) — Home Assistant shows one
+or the other, never both: it hides the - and + buttons whenever a slider is
+available. Turn this on to swap the slider for buttons that step the device's
+own volume scale one point at a time. The `volume_up` and `volume_down`
+services work either way.
+
 **Source map** — the input list is configuration, so other StreamSDK hardware
 can be supported without touching code:
 
