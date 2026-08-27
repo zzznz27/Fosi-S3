@@ -67,6 +67,43 @@
       "streaming_service": {
         "name": "Streaming service"
       }
+    },
+    "number": {
+      "eq_0": {
+        "name": "EQ 31.5 Hz"
+      },
+      "eq_1": {
+        "name": "EQ 63 Hz"
+      },
+      "eq_2": {
+        "name": "EQ 125 Hz"
+      },
+      "eq_3": {
+        "name": "EQ 250 Hz"
+      },
+      "eq_4": {
+        "name": "EQ 500 Hz"
+      },
+      "eq_5": {
+        "name": "EQ 1 kHz"
+      },
+      "eq_6": {
+        "name": "EQ 2 kHz"
+      },
+      "eq_7": {
+        "name": "EQ 4 kHz"
+      },
+      "eq_8": {
+        "name": "EQ 8 kHz"
+      },
+      "eq_9": {
+        "name": "EQ 16 kHz"
+      }
+    },
+    "switch": {
+      "equalizer": {
+        "name": "Equalizer"
+      }
     }
   }
 }

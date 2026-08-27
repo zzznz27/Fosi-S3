@@ -25,8 +25,10 @@ REMOVED_ENTITY_SUFFIXES = ("_like", "_dislike", "_stop_streaming")
 
 PLATFORMS: list[Platform] = [
     Platform.MEDIA_PLAYER,
+    Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 

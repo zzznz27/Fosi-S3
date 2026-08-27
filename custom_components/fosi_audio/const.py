@@ -77,6 +77,54 @@ POLL_PATHS: Final[dict[str, str]] = {
 VOLUME_MAP_PATH: Final = "settings:/mediaPlayer/volumeMap"
 MUTE_PATH: Final = "settings:/mediaPlayer/mute"
 
+# --------------------------------------------------------------------------
+# The 10-band graphic equaliser.
+#
+# Lives in the ui: tree - the same menu the device renders itself - so a change
+# here is visibly the control the device offers. Titles come from the device
+# ("31.5 Hz", "63.0 Hz", ...); they are repeated below only for entity naming.
+#
+# NOT settings:/mediaPlayer/bass or /treble. Those are readable, writable,
+# clamped to a plausible range, named by alsaMixerElements - and completely
+# inert. They appear nowhere in the ui: tree and nowhere in the device's own
+# web client. See CLAUDE.md §5.
+#
+# Measured on hardware: bands clamp to +/-10 dB rather than erroring, and snap
+# to a 0.5 dB grid rounding HALF UP (1.25 -> 1.5, -2.25 -> -2.0).
+#
+# The Fosi app's named presets are not a device concept - no preset node exists
+# anywhere. The app just writes these ten values.
+# --------------------------------------------------------------------------
+
+EQ_BANDS: Final[tuple[str, ...]] = (
+    "31.5 Hz", "63 Hz", "125 Hz", "250 Hz", "500 Hz",
+    "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz",
+)
+EQ_MIN: Final = -10.0
+EQ_MAX: Final = 10.0
+EQ_STEP: Final = 0.5
+
+EQ_ENABLED_PATH: Final = "settings:/mediaPlayer/equalizerOnOff"
+EQ_ENABLED_KEY: Final = "eq_enabled"
+
+
+def eq_key(index: int) -> str:
+    """Coordinator/data key for one band."""
+    return f"eq_{index}"
+
+
+def eq_path(index: int) -> str:
+    """Node path for one band."""
+    return f"ui:/settings/audio/eq/{index}"
+
+
+# Defined after POLL_PATHS because the helpers above are needed to build them.
+# The equaliser adds 11 reads per poll cycle, which is deliberate: Home
+# Assistant scenes can only capture band values it already knows, so the bands
+# have to be live state rather than read once at setup.
+POLL_PATHS[EQ_ENABLED_KEY] = EQ_ENABLED_PATH
+POLL_PATHS.update({eq_key(i): eq_path(i) for i in range(len(EQ_BANDS))})
+
 # Volume lives in the player: namespace, which does not enumerate - the name
 # came out of /webclient/index.js. player:volume is the device's own 0-100
 # volume index, and volumeMap[volume] is the dB it produces (verified exactly
