@@ -85,19 +85,19 @@
         "name": "EQ 500 Hz"
       },
       "eq_5": {
-        "name": "EQ 1 kHz"
+        "name": "EQ 1000 Hz"
       },
       "eq_6": {
-        "name": "EQ 2 kHz"
+        "name": "EQ 2000 Hz"
       },
       "eq_7": {
-        "name": "EQ 4 kHz"
+        "name": "EQ 4000 Hz"
       },
       "eq_8": {
-        "name": "EQ 8 kHz"
+        "name": "EQ 8000 Hz"
       },
       "eq_9": {
-        "name": "EQ 16 kHz"
+        "name": "EQ 16000 Hz"
       }
     },
     "switch": {

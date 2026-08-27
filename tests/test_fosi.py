@@ -765,6 +765,19 @@ def test_equalizer_bands() -> None:
     R.check("and treble", "treble" in const.POLL_PATHS, False)
 
     print()
+    print("-- names sort into frequency order in the Home Assistant UI --")
+    # HA natural-sorts entities by name, taking the numeric run in each. With
+    # bands labelled in mixed units the five kHz ones came first - 1, 2, 4, 8,
+    # 16 all sort before 31.5 - so the sliders appeared out of frequency
+    # order. One unit throughout keeps the numbers monotonic.
+    names = [f"EQ {label}" for label in const.EQ_BANDS]
+    numbers = [float(re.search(r"[\d.]+", n).group()) for n in names]
+    R.check("labels are monotonic", numbers, sorted(numbers))
+    R.check("all one unit", {n.rsplit(" ", 1)[-1] for n in names}, {"Hz"})
+    R.check("band 0 is the lowest", names[0], "EQ 31.5 Hz")
+    R.check("band 9 is the highest", names[9], "EQ 16000 Hz")
+
+    print()
     print("-- settle matches what the device measurably does --")
     # Both tie cases were measured on hardware. Python's round() is banker's
     # rounding and gets BOTH wrong, which is why floor(x + 0.5) is used.

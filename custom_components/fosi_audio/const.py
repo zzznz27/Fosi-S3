@@ -96,9 +96,14 @@ MUTE_PATH: Final = "settings:/mediaPlayer/mute"
 # anywhere. The app just writes these ten values.
 # --------------------------------------------------------------------------
 
+# Hz throughout, deliberately, even though "16 kHz" reads better than
+# "16000 Hz". Home Assistant natural-sorts entities by name, so mixing units
+# put the five kHz bands first: 1, 2, 4, 8, 16 sort before 31.5, 63, 125...
+# One unit keeps the numbers monotonic and the sliders in frequency order.
+# It also matches the device's own titles, which read "1000.0 Hz".
 EQ_BANDS: Final[tuple[str, ...]] = (
     "31.5 Hz", "63 Hz", "125 Hz", "250 Hz", "500 Hz",
-    "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz",
+    "1000 Hz", "2000 Hz", "4000 Hz", "8000 Hz", "16000 Hz",
 )
 EQ_MIN: Final = -10.0
 EQ_MAX: Final = 10.0
