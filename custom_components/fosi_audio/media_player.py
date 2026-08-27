@@ -18,6 +18,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import FosiConfigEntry
 from .api import NsdkError
 from .const import (
+    CONF_VOLUME_BUTTONS,
     CONTROL_KEY_NEXT,
     CONTROL_KEY_PAUSE,
     CONTROL_KEY_PLAY,
@@ -27,6 +28,7 @@ from .const import (
     CONTROL_PREVIOUS,
     CONTROL_STOP,
     CONTROL_TOGGLE,
+    DEFAULT_VOLUME_BUTTONS,
     MUTE_PATH,
     PLAYER_CONTROL_PATH,
     PLAYER_STATE_PAUSED,
@@ -110,6 +112,13 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
     # ------------------------------------------------------------ player data
 
     @property
+    def _volume_buttons_only(self) -> bool:
+        """Show +/- buttons instead of the slider, if the user asked for it."""
+        return bool(
+            self._entry.options.get(CONF_VOLUME_BUTTONS, DEFAULT_VOLUME_BUTTONS)
+        )
+
+    @property
     def _player(self) -> dict[str, Any]:
         player = self.coordinator.data.get("player")
         return player if isinstance(player, dict) else {}
@@ -139,10 +148,13 @@ class FosiMediaPlayer(FosiSourceEntity, MediaPlayerEntity):
         if self.coordinator.data.get("mute") is not None:
             features |= MediaPlayerEntityFeature.VOLUME_MUTE
         if self.coordinator.data.get("volume") is not None:
-            features |= (
-                MediaPlayerEntityFeature.VOLUME_SET
-                | MediaPlayerEntityFeature.VOLUME_STEP
-            )
+            # VOLUME_STEP is always advertised - the volume_up/volume_down
+            # services should work regardless of what the card draws. Whether
+            # VOLUME_SET rides along decides which control HA renders, because
+            # the slider suppresses the buttons. See CONF_VOLUME_BUTTONS.
+            features |= MediaPlayerEntityFeature.VOLUME_STEP
+            if not self._volume_buttons_only:
+                features |= MediaPlayerEntityFeature.VOLUME_SET
 
         # Test the VALUE, not just the key. A Cast source reports
         # "playMode": {} - the key is present but the empty object means
