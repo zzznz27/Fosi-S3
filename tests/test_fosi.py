@@ -31,6 +31,8 @@ from fosi_audio.coordinator import FosiCoordinator  # noqa: E402
 from fosi_audio import events as events_mod  # noqa: E402
 from fosi_audio.events import FosiEventListener  # noqa: E402
 from fosi_audio.sensor import SENSORS, FosiPlayerSensor  # noqa: E402
+from fosi_audio.number import EQ_CONTROLS, FosiEqBand, settle  # noqa: E402
+from fosi_audio.switch import FosiEqualizerSwitch  # noqa: E402
 from fosi_audio import diagnostics as diag  # noqa: E402
 from homeassistant.components.media_player import (  # noqa: E402
     MediaPlayerEntityFeature,
@@ -173,11 +175,20 @@ class _FailingClient:
         raise self._exc
 
 
+class FakeEntry:
+    """Just the config-entry surface the entities actually touch."""
+
+    def __init__(self, options=None) -> None:
+        self.entry_id = "test_entry"
+        self.options = options or {}
+
+
 class FakePlayer(FosiMediaPlayer):
     """FosiMediaPlayer without the CoordinatorEntity constructor."""
 
-    def __init__(self, **data) -> None:
+    def __init__(self, options=None, **data) -> None:
         self._sources = SOURCES
+        self._entry = FakeEntry(options)
         self.coordinator = FakeCoordinator()
         self.coordinator.data = {"source": 0, "mute": False, **data}
 
@@ -742,6 +753,146 @@ def test_volume_db_attribute() -> None:
     R.check("no curve, no dB", p.extra_state_attributes["volume_db"], None)
 
 
+def test_equalizer_bands() -> None:
+    """The 10-band EQ is the real tone control on this device.
+
+    settings:/mediaPlayer/bass and /treble look identical over the API -
+    writable, persisted, clamped to a plausible range, named by
+    alsaMixerElements - and do nothing at all. They appear nowhere in the ui:
+    tree and nowhere in the device's own web client. These bands do, which is
+    why they are what gets exposed.
+    """
+    print()
+    print("== the 10-band equaliser ==")
+    R.check("ten bands", len(EQ_CONTROLS), 10)
+    R.check("first is 31.5 Hz", EQ_CONTROLS[0].path, "ui:/settings/audio/eq/0")
+    R.check("last is 16 kHz", EQ_CONTROLS[9].path, "ui:/settings/audio/eq/9")
+    R.check("bands are polled", const.POLL_PATHS["eq_0"], "ui:/settings/audio/eq/0")
+    R.check("so is the master switch",
+            const.POLL_PATHS[const.EQ_ENABLED_KEY], const.EQ_ENABLED_PATH)
+    R.check("the dead bass node is gone", "bass" in const.POLL_PATHS, False)
+    R.check("and treble", "treble" in const.POLL_PATHS, False)
+
+    print()
+    print("-- names sort into frequency order in the Home Assistant UI --")
+    # HA natural-sorts entities by name, taking the numeric run in each. With
+    # bands labelled in mixed units the five kHz ones came first - 1, 2, 4, 8,
+    # 16 all sort before 31.5 - so the sliders appeared out of frequency
+    # order. One unit throughout keeps the numbers monotonic.
+    names = [f"EQ {label}" for label in const.EQ_BANDS]
+    numbers = [float(re.search(r"[\d.]+", n).group()) for n in names]
+    R.check("labels are monotonic", numbers, sorted(numbers))
+    R.check("all one unit", {n.rsplit(" ", 1)[-1] for n in names}, {"Hz"})
+    R.check("band 0 is the lowest", names[0], "EQ 31.5 Hz")
+    R.check("band 9 is the highest", names[9], "EQ 16000 Hz")
+
+    print()
+    print("-- settle matches what the device measurably does --")
+    # Both tie cases were measured on hardware. Python's round() is banker's
+    # rounding and gets BOTH wrong, which is why floor(x + 0.5) is used.
+    R.check("1.25 rounds half up", settle(1.25), 1.5)
+    R.check("-2.25 rounds half up", settle(-2.25), -2.0)
+    R.check("clamps low", settle(-100), const.EQ_MIN)
+    R.check("clamps high", settle(100), const.EQ_MAX)
+    R.check("a grid value is untouched", settle(-6.5), -6.5)
+
+    print()
+    print("-- writing sends the settled value and never re-reads --")
+    band = FosiEqBand.__new__(FosiEqBand)
+    band.entity_description = EQ_CONTROLS[1]
+    band.coordinator = FakeCoordinator()
+    band.coordinator.data = {"eq_1": -6.5}
+    R.check("reads through", band.native_value, -6.5)
+
+    asyncio.run(band.async_set_native_value(-99))
+    path, value, role = band.coordinator.client.sent[-1]
+    R.check("writes the ui: node", path, "ui:/settings/audio/eq/1")
+    R.check("as a double", value["type"], "double_")
+    R.check("clamped on the wire", value["double_"], const.EQ_MIN)
+    R.check("published clamped", band.native_value, const.EQ_MIN)
+    R.check("no racing refresh", band.coordinator.refreshes, 0)
+
+    # Measured on 1.0.276: the bands silently ignore anything but double_.
+    # An i32_ 3 returns HTTP 200 and changes nothing, so a whole number must
+    # still go out as a double or the write is lost with no error at all.
+    asyncio.run(band.async_set_native_value(3))
+    path, value, role = band.coordinator.client.sent[-1]
+    R.check("a whole number still goes as a double", value["type"], "double_")
+    R.check("with the right value", value["double_"], 3.0)
+
+    print()
+    print("-- a band the device never answered stays blank --")
+    blank = FosiEqBand.__new__(FosiEqBand)
+    blank.entity_description = EQ_CONTROLS[0]
+    blank.coordinator = FakeCoordinator()
+    blank.coordinator.data = {}
+    R.check("no value, no guess", blank.native_value, None)
+    blank.coordinator.data = {"eq_0": True}
+    R.check("a bool is not a dB value", blank.native_value, None)
+
+
+def test_equalizer_switch() -> None:
+    """With the equaliser off every band is inert, so expose that state."""
+    print()
+    print("== equaliser master switch ==")
+    sw = FosiEqualizerSwitch.__new__(FosiEqualizerSwitch)
+    sw.coordinator = FakeCoordinator()
+
+    sw.coordinator.data = {const.EQ_ENABLED_KEY: True}
+    R.check("reads on", sw.is_on, True)
+    sw.coordinator.data = {const.EQ_ENABLED_KEY: False}
+    R.check("reads off", sw.is_on, False)
+    sw.coordinator.data = {}
+    R.check("unknown stays unknown", sw.is_on, None)
+
+    sw.coordinator.data = {const.EQ_ENABLED_KEY: False}
+    asyncio.run(sw.async_turn_on())
+    path, value, role = sw.coordinator.client.sent[-1]
+    R.check("writes the node", path, const.EQ_ENABLED_PATH)
+    R.check("as a bool", value, {"type": "bool_", "bool_": True})
+    R.check("optimistic", sw.is_on, True)
+    R.check("no racing refresh", sw.coordinator.refreshes, 0)
+
+    asyncio.run(sw.async_turn_off())
+    R.check("off writes false", sw.coordinator.client.sent[-1][1]["bool_"], False)
+    R.check("and publishes", sw.is_on, False)
+
+
+def test_volume_buttons_option() -> None:
+    """Slider and +/- buttons are mutually exclusive in Home Assistant.
+
+    The more-info dialog gates the buttons on
+    `VOLUME_STEP && !supportsSliding`, so VOLUME_SET always wins and hides
+    them. Getting the buttons means withholding VOLUME_SET, which is a real
+    trade rather than a strictly-better setting - hence an option, defaulting
+    to the slider so no existing card changes on upgrade.
+    """
+    print("\n== volume buttons are an either/or with the slider ==")
+    F = MediaPlayerEntityFeature
+
+    default = FakePlayer(volume=40).supported_features
+    R.check("slider by default", bool(default & F.VOLUME_SET), True)
+    R.check("step always advertised", bool(default & F.VOLUME_STEP), True)
+
+    opted = FakePlayer(options={"volume_buttons": True}, volume=40)
+    feats = opted.supported_features
+    R.check("VOLUME_SET withheld", bool(feats & F.VOLUME_SET), False)
+    R.check("so HA draws the buttons", bool(feats & F.VOLUME_STEP), True)
+    R.check("mute is unaffected", bool(feats & F.VOLUME_MUTE), True)
+
+    print("\n-- volume_up/down still work either way --")
+    want = (const.VOLUME_PATH, {"type": "i32_", "i32_": 41}, "value")
+    modes = (("slider mode", FakePlayer(volume=40)), ("button mode", opted))
+    for label, player in modes:
+        asyncio.run(player.async_volume_up())
+        R.check(f"stepped up in {label}", player.sent[-1], want)
+
+    print("\n-- no volume node: neither control is offered --")
+    none = FakePlayer(options={"volume_buttons": True}).supported_features
+    R.check("no set", bool(none & F.VOLUME_SET), False)
+    R.check("no step", bool(none & F.VOLUME_STEP), False)
+
+
 def test_pushes_restore_availability() -> None:
     """A push proves the device is reachable and must clear the failed flag.
 
@@ -1097,9 +1248,12 @@ def main() -> int:
         test_transport_commands,
         test_poll_merges_rather_than_replacing,
         test_volume_db_attribute,
+        test_volume_buttons_option,
         test_pushes_restore_availability,
         test_event_queue_is_recycled,
         test_event_parsing,
+        test_equalizer_bands,
+        test_equalizer_switch,
         test_events_do_not_starve_the_poll,
         test_position_timestamp,
         test_network_service_attribute,

@@ -24,6 +24,8 @@ StreamSDK hardware may work with a different source map.
 | `media_player.<name>` | Source, volume, mute, transport, now-playing |
 | `sensor.<name>_streaming_protocol` | How audio is arriving — Google Cast, AirPlay, Spotify Connect |
 | `sensor.<name>_streaming_service` | What is playing it — YouTube Music, Spotify, Apple Music |
+| `number.<name>_eq_*` | Ten equaliser bands, 31.5 Hz to 16 kHz, −10 to +10 dB |
+| `switch.<name>_equalizer` | Turns the equaliser as a whole on or off |
 
 Transport is play/pause, next, previous, stop, and a power button that ends the
 streaming session — the device is an amplifier with no standby, so there is no
@@ -46,9 +48,60 @@ streams to them, so they can be reported but not selected. The input select
 shows `Network` while one is live; its `selectable_sources` attribute lists the
 inputs that can actually be switched to, which is what automations should read.
 
+The ten equaliser bands are the device's own, in 0.5 dB steps — the same
+control its web UI offers, so a change here shows up there. With the equaliser
+switch off the bands do nothing, which is why that state is exposed too.
+
+**The Fosi app's presets — standard, rock, jazz and the rest — are these same
+ten values.** They are not a separate device setting; the app simply writes the
+bands. So picking a preset in the app overwrites anything set from Home
+Assistant, and vice versa.
+
+**Firmware from late September 2026 made the equaliser stronger.** Fosi
+"increased its sensitivity" after reports that it was barely audible, so the
+same setting now has a bigger effect. The range, step size and entities are
+unchanged, but a curve or scene tuned on older firmware will sound more
+pronounced now and may be worth re-tuning. The equaliser applies to both
+channels together and to both outputs, optical and RCA/XLR.
+
 Updates are pushed by the device over its event API, so a track change or a
 press on the remote appears in a fraction of a second. Polling continues
 underneath as a safety net.
+
+### A night mode for bass
+
+Use scenes. Home Assistant already captures and restores a set of values, so
+nothing has to be remembered inside the integration — and nothing goes stale
+when you change the curve from the Fosi app.
+
+Set the curve how you like it normally and capture that as a scene, then pull
+the low bands down and capture that as a second scene:
+
+```yaml
+automation:
+  - alias: Quiet the bass after 10pm
+    triggers:
+      - trigger: time
+        at: "22:00:00"
+    actions:
+      - action: scene.turn_on
+        target:
+          entity_id: scene.eq_night
+  - alias: Normal EQ in the morning
+    triggers:
+      - trigger: time
+        at: "08:00:00"
+    actions:
+      - action: scene.turn_on
+        target:
+          entity_id: scene.eq_normal
+```
+
+The bass bands are `eq_0` (31.5 Hz), `eq_1` (63 Hz) and `eq_2` (125 Hz).
+
+There is deliberately no night-mode switch. One would have to remember a curve
+to restore, and that memory goes stale the moment the equaliser is changed from
+the app or the front panel.
 
 ## Requirements
 
@@ -123,6 +176,12 @@ From **Configure** on the integration card. No YAML.
 **Poll interval** (default 60s, 5–600 allowed) — a safety net only, since the
 device pushes its own changes. A poll fills in values the event stream has not
 supplied; it never overwrites something newer.
+
+**Volume buttons instead of a slider** (default off) — Home Assistant shows one
+or the other, never both: it hides the - and + buttons whenever a slider is
+available. Turn this on to swap the slider for buttons that step the device's
+own volume scale one point at a time. The `volume_up` and `volume_down`
+services work either way.
 
 **Source map** — the input list is configuration, so other StreamSDK hardware
 can be supported without touching code:

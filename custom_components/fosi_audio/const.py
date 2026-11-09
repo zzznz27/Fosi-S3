@@ -11,6 +11,15 @@ DEFAULT_MODEL: Final = "S3"
 # CONF_SCAN_INTERVAL comes from homeassistant.const - no need to redefine it.
 CONF_SOURCES: Final = "sources"
 
+# Home Assistant renders a volume slider OR volume +/- buttons, never both:
+# the more-info dialog gates the buttons on `VOLUME_STEP && !supportsSliding`,
+# so advertising VOLUME_SET always wins and hides them. Dropping VOLUME_SET is
+# the only way to get the buttons, which makes this a genuine either/or and
+# therefore the user's choice. Default false = keep the slider, so nobody's
+# card changes on upgrade.
+CONF_VOLUME_BUTTONS: Final = "volume_buttons"
+DEFAULT_VOLUME_BUTTONS: Final = False
+
 DEFAULT_SCAN_INTERVAL: Final = 60
 MIN_SCAN_INTERVAL: Final = 5
 MAX_SCAN_INTERVAL: Final = 600
@@ -76,6 +85,59 @@ POLL_PATHS: Final[dict[str, str]] = {
 
 VOLUME_MAP_PATH: Final = "settings:/mediaPlayer/volumeMap"
 MUTE_PATH: Final = "settings:/mediaPlayer/mute"
+
+# --------------------------------------------------------------------------
+# The 10-band graphic equaliser.
+#
+# Lives in the ui: tree - the same menu the device renders itself - so a change
+# here is visibly the control the device offers. Titles come from the device
+# ("31.5 Hz", "63.0 Hz", ...); they are repeated below only for entity naming.
+#
+# NOT settings:/mediaPlayer/bass or /treble. Those are readable, writable,
+# clamped to a plausible range, named by alsaMixerElements - and completely
+# inert. They appear nowhere in the ui: tree and nowhere in the device's own
+# web client. See CLAUDE.md §5.
+#
+# Measured on hardware: bands clamp to +/-10 dB rather than erroring, and snap
+# to a 0.5 dB grid rounding HALF UP (1.25 -> 1.5, -2.25 -> -2.0).
+#
+# The Fosi app's named presets are not a device concept - no preset node exists
+# anywhere. The app just writes these ten values.
+# --------------------------------------------------------------------------
+
+# Hz throughout, deliberately, even though "16 kHz" reads better than
+# "16000 Hz". Home Assistant natural-sorts entities by name, so mixing units
+# put the five kHz bands first: 1, 2, 4, 8, 16 sort before 31.5, 63, 125...
+# One unit keeps the numbers monotonic and the sliders in frequency order.
+# It also matches the device's own titles, which read "1000.0 Hz".
+EQ_BANDS: Final[tuple[str, ...]] = (
+    "31.5 Hz", "63 Hz", "125 Hz", "250 Hz", "500 Hz",
+    "1000 Hz", "2000 Hz", "4000 Hz", "8000 Hz", "16000 Hz",
+)
+EQ_MIN: Final = -10.0
+EQ_MAX: Final = 10.0
+EQ_STEP: Final = 0.5
+
+EQ_ENABLED_PATH: Final = "settings:/mediaPlayer/equalizerOnOff"
+EQ_ENABLED_KEY: Final = "eq_enabled"
+
+
+def eq_key(index: int) -> str:
+    """Coordinator/data key for one band."""
+    return f"eq_{index}"
+
+
+def eq_path(index: int) -> str:
+    """Node path for one band."""
+    return f"ui:/settings/audio/eq/{index}"
+
+
+# Defined after POLL_PATHS because the helpers above are needed to build them.
+# The equaliser adds 11 reads per poll cycle, which is deliberate: Home
+# Assistant scenes can only capture band values it already knows, so the bands
+# have to be live state rather than read once at setup.
+POLL_PATHS[EQ_ENABLED_KEY] = EQ_ENABLED_PATH
+POLL_PATHS.update({eq_key(i): eq_path(i) for i in range(len(EQ_BANDS))})
 
 # Volume lives in the player: namespace, which does not enumerate - the name
 # came out of /webclient/index.js. player:volume is the device's own 0-100

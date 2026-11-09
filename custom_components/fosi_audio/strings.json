@@ -39,11 +39,13 @@
         "description": "The source map is JSON. An entry needs a \"path\" to be selectable: role \"activate\" invokes an action node, role \"value\" writes the given \"value\". An entry with only a \"state\" is reported but never offered as an option, which is how the network sources work. Confirm the real indices by watching settings:/custom/lastAudioSource while switching inputs on the remote.",
         "data": {
           "sources": "Source map (JSON)",
-          "scan_interval": "Poll interval (seconds)"
+          "scan_interval": "Poll interval (seconds)",
+          "volume_buttons": "Volume buttons instead of a slider"
         },
         "data_description": {
           "sources": "Leave blank to restore the shipped defaults.",
-          "scan_interval": "How often to read the device's state. Longer is gentler on a device on wifi."
+          "scan_interval": "How often to read the device's state. Longer is gentler on a device on wifi.",
+          "volume_buttons": "Home Assistant shows one or the other, never both. Leave off for the slider; turn on to get - and + buttons that step the device's own volume scale one point at a time."
         }
       }
     },
@@ -66,6 +68,43 @@
       },
       "streaming_service": {
         "name": "Streaming service"
+      }
+    },
+    "number": {
+      "eq_0": {
+        "name": "EQ 31.5 Hz"
+      },
+      "eq_1": {
+        "name": "EQ 63 Hz"
+      },
+      "eq_2": {
+        "name": "EQ 125 Hz"
+      },
+      "eq_3": {
+        "name": "EQ 250 Hz"
+      },
+      "eq_4": {
+        "name": "EQ 500 Hz"
+      },
+      "eq_5": {
+        "name": "EQ 1000 Hz"
+      },
+      "eq_6": {
+        "name": "EQ 2000 Hz"
+      },
+      "eq_7": {
+        "name": "EQ 4000 Hz"
+      },
+      "eq_8": {
+        "name": "EQ 8000 Hz"
+      },
+      "eq_9": {
+        "name": "EQ 16000 Hz"
+      }
+    },
+    "switch": {
+      "equalizer": {
+        "name": "Equalizer"
       }
     }
   }
