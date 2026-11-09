@@ -57,6 +57,13 @@ ten values.** They are not a separate device setting; the app simply writes the
 bands. So picking a preset in the app overwrites anything set from Home
 Assistant, and vice versa.
 
+**Firmware from late September 2026 made the equaliser stronger.** Fosi
+"increased its sensitivity" after reports that it was barely audible, so the
+same setting now has a bigger effect. The range, step size and entities are
+unchanged, but a curve or scene tuned on older firmware will sound more
+pronounced now and may be worth re-tuning. The equaliser applies to both
+channels together and to both outputs, optical and RCA/XLR.
+
 Updates are pushed by the device over its event API, so a track change or a
 press on the remote appears in a fraction of a second. Polling continues
 underneath as a safety net.

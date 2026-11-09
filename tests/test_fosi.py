@@ -812,6 +812,14 @@ def test_equalizer_bands() -> None:
     R.check("published clamped", band.native_value, const.EQ_MIN)
     R.check("no racing refresh", band.coordinator.refreshes, 0)
 
+    # Measured on 1.0.276: the bands silently ignore anything but double_.
+    # An i32_ 3 returns HTTP 200 and changes nothing, so a whole number must
+    # still go out as a double or the write is lost with no error at all.
+    asyncio.run(band.async_set_native_value(3))
+    path, value, role = band.coordinator.client.sent[-1]
+    R.check("a whole number still goes as a double", value["type"], "double_")
+    R.check("with the right value", value["double_"], 3.0)
+
     print()
     print("-- a band the device never answered stays blank --")
     blank = FosiEqBand.__new__(FosiEqBand)
